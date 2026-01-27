@@ -1,0 +1,44 @@
+Statistical Imputation Methods - Best Practices
+Source: Statistical Analysis Handbook
+
+Missing Data Mechanisms:
+
+MCAR (Missing Completely at Random):
+- Missingness unrelated to any variable
+- Safe to use simple imputation or deletion
+- Rare in healthcare data
+
+MAR (Missing at Random):
+- Missingness related to observed variables
+- KNN or multiple imputation recommended
+- Common in clinical datasets
+
+MNAR (Missing Not at Random):
+- Missingness related to unobserved values
+- Most complex, requires careful handling
+- Example: Sicker patients skip tests
+
+Imputation Methods:
+
+Mean/Median Imputation:
+- Use when: <5% missing, MCAR assumption holds
+- Median preferred for: Skewed data (skewness > |0.5|)
+- Mean preferred for: Symmetric data (skewness < |0.5|)
+- Limitation: Reduces variance, doesn't preserve relationships
+
+KNN Imputation:
+- Use when: 5-20% missing, features correlated
+- Predicts missing values using k-nearest neighbors
+- Preserves relationships better than mean/median
+- Computationally expensive for large datasets
+
+Multiple Imputation (MICE):
+- Use when: >20% missing, MAR mechanism
+- Creates multiple plausible datasets
+- Research gold standard
+- Time-intensive, requires statistical expertise
+
+Deletion:
+- Use when: <3% missing AND large dataset (>5000 samples)
+- May introduce selection bias
+- Only acceptable if missingness truly random

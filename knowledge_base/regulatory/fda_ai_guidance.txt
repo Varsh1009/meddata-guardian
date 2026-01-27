@@ -1,0 +1,29 @@
+FDA Guidance on Artificial Intelligence and Machine Learning in Medical Devices
+Source: FDA 2021 Guidance Document
+
+Key Requirements:
+
+Demographic Subgroup Analysis:
+- Algorithm performance must be evaluated across demographic subgroups
+- Minimum requirements: age, sex, race/ethnicity
+- Performance metrics must be reported separately for each subgroup
+- Substantial differences in performance require justification or mitigation
+
+Algorithmic Bias Considerations:
+- Training data must be representative of intended use population
+- Underrepresentation of specific groups must be documented
+- If performance differs >5% across groups, additional validation required
+- Post-market surveillance for fairness required
+
+Data Quality Standards:
+- Missing data handling must be documented and justified
+- Imputation methods must be validated
+- Data quality metrics required in submission
+- Bias in training data can lead to 510(k) rejection
+
+Documentation Requirements:
+- Dataset composition (demographics, sample sizes)
+- Data quality assessment
+- Fairness metric calculations
+- Mitigation strategies for identified bias
+- Validation results by subgroup

@@ -1,0 +1,15 @@
+Clinical Cholesterol Guidelines
+Source: American Heart Association
+
+Normal Cholesterol Levels:
+- Desirable: Less than 200 mg/dL
+- Borderline high: 200-239 mg/dL
+- High: 240 mg/dL and above
+- Very high: 400+ mg/dL indicates severe cardiovascular risk
+
+Clinical Significance:
+High cholesterol is a primary risk factor for coronary heart disease and stroke. Patients with cholesterol levels above 240 mg/dL have twice the risk of heart disease compared to those with desirable levels below 200 mg/dL.
+
+In heart disease prediction models, patients with very high cholesterol (>400 mg/dL) represent the highest-risk population and are critical for model training. Removing these values as "outliers" would eliminate the most predictive cases.
+
+Treatment thresholds vary by patient risk factors, but levels above 190 mg/dL typically warrant intervention in high-risk patients.

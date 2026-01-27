@@ -1,0 +1,23 @@
+Indigenous American Health Disparities
+Source: CDC Health Disparities Report, Indian Health Service
+
+Cardiovascular Disease in Indigenous Populations:
+
+Prevalence:
+- Heart disease death rate: 2x higher than non-Hispanic whites
+- Diabetes prevalence: 3x national average (major cardiac risk factor)
+- Hypertension: 1.5x more prevalent
+- Stroke mortality: 1.4x higher
+
+Contributing Factors:
+- Limited access to healthcare (rural/reservation isolation)
+- Lower rates of preventive care
+- Higher rates of risk factors (smoking, obesity, diabetes)
+- Socioeconomic barriers
+- Historical trauma and chronic stress
+
+Clinical Implications:
+AI models trained without Indigenous patient representation will be completely unreliable for this population. Indigenous communities already face significant healthcare disparities - biased algorithms worsen existing inequities.
+
+Recommended Approach:
+Partner with Tribal Health Centers, Indian Health Service facilities, and urban Indian health organizations. Meaningful engagement with tribal communities required for ethical data collection. Consultation with tribal IRBs recommended.

@@ -1,0 +1,22 @@
+Gender Differences in Cardiac Disease Presentation
+Source: Journal of American College of Cardiology, CDC
+
+Symptom Presentation Differences:
+
+Men with heart attacks typically present with:
+- Chest pain or discomfort (89% of cases)
+- Pain radiating to left arm (72%)
+- Shortness of breath (58%)
+- Cold sweat (64%)
+
+Women with heart attacks often present with:
+- Unusual fatigue (58% of cases) - often only symptom
+- Chest discomfort (58%) - less common than men
+- Nausea or vomiting (42%)
+- Jaw, neck, or back pain (38%)
+- Shortness of breath without chest pain (35%)
+
+Clinical Implications:
+Models trained predominantly on male patients may miss atypical presentations common in women. Women are 50% more likely to receive initial misdiagnosis in emergency departments. Gender-balanced datasets are critical for detecting diverse symptom patterns.
+
+Historical bias in cardiac research has led to systematic underdiagnosis in women, contributing to higher mortality rates for female heart attack patients under age 50.
