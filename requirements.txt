@@ -1,14 +1,39 @@
+# Core Data Processing
 pandas==2.1.4
 numpy==1.26.2
 scipy==1.11.4
+
+# Machine Learning & Fairness
 scikit-learn==1.3.2
 fairlearn==0.10.0
 imbalanced-learn==0.11.0
+
+# Visualization
 plotly==5.18.0
 matplotlib==3.8.2
 seaborn==0.13.0
+
+# UI Framework
 streamlit==1.29.0
+
+# AI/LLM Stack
+ollama==0.1.6
+pydantic==2.5.3
+
+# RAG & Vector Store
+chromadb==0.4.22
+sentence-transformers==2.3.1
+langchain==0.1.0
+
+# Synthetic Data Generation
+sdv==1.9.0
+
+# Data Generation & Utilities
 faker==22.0.0
+pyyaml==6.0.1
+python-dotenv==1.0.0
+
+# Development
 jupyter==1.0.0
 ipykernel==6.27.1
-pyyaml==6.0.1
+pytest==7.4.3
