@@ -1225,9 +1225,9 @@ with tab2:
                 if info['bias_detected']:
                     # Show gap interpretation only when bias is detected
                     if gap < 15:
-                        st.warning(f"⚠️ **Minor imbalance detected.** Distribution gap: {gap:.1f}% (FDA threshold: <5%)")
+                        st.warning(f"⚠️ **Minor imbalance detected.** Distribution gap: {gap:.1f}% (fairness threshold: <5%)")
                     else:
-                        st.error(f"🚨 **Significant imbalance!** Distribution gap: {gap:.1f}% (FDA threshold: <5%)")
+                        st.error(f"🚨 **Significant imbalance!** Distribution gap: {gap:.1f}% (fairness threshold: <5%)")
                     st.markdown("""
                     <div class="error-box">
                     ⚠️ <strong>BIAS DETECTED - Detailed Issues:</strong>
@@ -1345,7 +1345,7 @@ X_balanced, y_balanced = smote.fit_resample(X, y)""", language='python')
                     max_pct = max(dist_df['Percentage'])
                     min_pct = min(dist_df['Percentage'])
                     gap = abs(max_pct - min_pct)
-                    st.success(f"✅ **Well balanced!** Distribution gap: {gap:.1f}% (FDA threshold: <5%)")
+                    st.success(f"✅ **Well balanced!** Distribution gap: {gap:.1f}% (fairness threshold: <5%)")
         else:
             st.markdown("""
             <div class="info-box">
@@ -2128,19 +2128,3 @@ with tab5:
 
 st.session_state.analysis_complete = True
 
-# ============================================================================
-# FOOTER
-# ============================================================================
-
-st.divider()
-
-footer_col1, footer_col2, footer_col3 = st.columns(3)
-with footer_col1:
-    st.markdown("<div style='text-align: center;'>🏥 <strong>MedGuard AI</strong></div>", unsafe_allow_html=True)
-with footer_col2:
-    st.markdown("<div style='text-align: center;'>🏆 <strong>Convergence 2026 Hackathon</strong></div>", unsafe_allow_html=True)
-with footer_col3:
-    st.markdown("<div style='text-align: center;'>👥 <strong>The Guardians Team</strong></div>", unsafe_allow_html=True)
-
-st.write("")
-st.markdown("<div style='text-align: center; opacity: 0.5;'><small>Built with ❤️ using Streamlit • Powered by Llama 3.2</small></div>", unsafe_allow_html=True)
