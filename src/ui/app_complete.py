@@ -713,15 +713,38 @@ with col_generate2:
     if st.button("📥 Download Synthetic", use_container_width=True):
         st.session_state.download_synthetic = True
 
-with st.spinner("⚙️ Generating synthetic twin..."):
-    generator = SyntheticDataGenerator()
-    generator.fit(df)
-    synthetic_df = generator.generate(n_samples=synthetic_size)
-    validation = generator.validate_privacy(df, synthetic_df)
+# Cache synthetic dataset generation to avoid regenerating on every rerun
+# Create a hash based on original df and synthetic_size
+try:
+    # Try to use values hash for numeric data (faster)
+    df_hash = hash(str(df.values.tobytes()) + str(df.columns.tolist()) + str(len(df)) + str(df.shape))
+except (AttributeError, TypeError):
+    # Fallback: use string representation (works with all data types)
+    df_hash = hash(str(df.to_string()) + str(df.columns.tolist()) + str(len(df)) + str(df.shape))
+synthetic_cache_key = f"synthetic_df_{df_hash}_{synthetic_size}"
+
+# Check if we need to regenerate (only if df changed or size changed)
+if (synthetic_cache_key not in st.session_state or 
+    'synthetic_df' not in st.session_state or
+    'synthetic_validation' not in st.session_state):
+    
+    with st.spinner("⚙️ Generating synthetic twin..."):
+        generator = SyntheticDataGenerator()
+        generator.fit(df)
+        synthetic_df = generator.generate(n_samples=synthetic_size)
+        validation = generator.validate_privacy(df, synthetic_df)
+    
+    # Cache the synthetic dataset and validation
+    st.session_state.synthetic_df = synthetic_df
+    st.session_state.synthetic_validation = validation
+    st.session_state.synthetic_cache_key = synthetic_cache_key
+else:
+    # Use cached synthetic dataset (instant - no regeneration!)
+    synthetic_df = st.session_state.synthetic_df
+    validation = st.session_state.synthetic_validation
 
 # Continue with rest of the code...
-    
-    if validation['privacy_safe']:
+if validation['privacy_safe']:
         similarity = validation['statistical_similarity']
         st.write(f"✅ Synthetic twin generated | Statistical similarity: **{similarity:.1%}** ")
         
@@ -768,17 +791,32 @@ with st.spinner("⚙️ Generating synthetic twin..."):
                 
                 comparison_df = pd.DataFrame(comparison_data)
                 st.dataframe(comparison_df, use_container_width=True)
-    else:
-        st.warning("⚠️ Privacy validation concern - proceeding with caution")
+else:
+    st.warning("⚠️ Privacy validation concern - proceeding with caution")
+
+# ========================================================================
+# ANALYSIS WITH AI AGENTS
+# ========================================================================
+
+#Sst.divider()
+st.markdown("## 🤖 Step 5: Multi-Agent Analysis")
+
+# Cache analysis results to avoid rerunning on every widget interaction
+# Create a hash of the dataset to detect if it changed
+# Use a more robust hash that works with mixed data types
+try:
+    dataset_hash = hash(str(synthetic_df.values.tobytes()) + str(synthetic_df.columns.tolist()) + str(len(synthetic_df)))
+except (AttributeError, TypeError):
+    # Fallback for non-numeric data: use string representation
+    dataset_hash = hash(str(synthetic_df.to_string()) + str(synthetic_df.columns.tolist()) + str(len(synthetic_df)))
+
+# Check if we need to run analysis (only if dataset changed or results not cached)
+if ('analysis_hash' not in st.session_state or 
+    st.session_state.analysis_hash != dataset_hash or
+    'quality_issues' not in st.session_state or
+    'bias_issues' not in st.session_state):
     
-    # ========================================================================
-    # ANALYSIS WITH AI AGENTS
-    # ========================================================================
-    
-    #Sst.divider()
-    st.markdown("## 🤖 Step 5: Multi-Agent Analysis")
-    
-    # Run Python analysis
+    # Run Python analysis (only once per dataset)
     with st.spinner("🔬 Running comprehensive statistical analysis..."):
         analyzer = DataQualityAnalyzer(synthetic_df)
         quality_issues = analyzer.run_full_analysis()
@@ -793,47 +831,175 @@ with st.spinner("⚙️ Generating synthetic twin..."):
         bias_issues = bias_detector.run_full_analysis()
         bias_summary = bias_detector.get_summary()
     
-    # Enhanced summary metrics
-    col1, col2, col3, col4, col5 = st.columns(5)
-    
-    with col1:
-        st.metric("📊 Total Records", f"{quality_summary['total_records']:,}")
-    with col2:
-        missing_count = quality_summary['missing_value_columns']
-        st.metric("⚠️ Missing Values", missing_count, delta=f"-{missing_count}" if missing_count > 0 else None, delta_color="inverse")
-    with col3:
-        dup_count = quality_summary.get('duplicate_records', 0)
-        st.metric("🔄 Duplicates", dup_count, delta=f"-{dup_count}" if dup_count > 0 else None, delta_color="inverse")
-    with col4:
-        bias_count = bias_summary['attributes_with_bias']
-        st.metric("⚖️ Bias Detected", bias_count, delta=f"-{bias_count}" if bias_count > 0 else None, delta_color="inverse")
-    with col5:
-        total_issues = missing_count + dup_count + bias_count
-        if total_issues == 0:
-            st.metric("🎯 Status", "🟢 Clean")
-        elif total_issues <= 3:
-            st.metric("🎯 Status", "🟡 Minor")
-        else:
-            st.metric("🎯 Status", "🔴 Critical")
-    
-    # ========================================================================
-    # TABS
-    # ========================================================================
-    
-    st.divider()
-    
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "🔍 Data Quality + AI Insights",
-        "⚖️ Bias Analysis + Fairness Plan",
-        "📅 Deployment Roadmap",
-        "💬 Ask AI Questions"
-    ])
-    
-    # ========================================================================
-    # TAB 1: DATA QUALITY (continued in next artifact section...)
-    # ========================================================================
-    
-    with tab1:
+    # Cache the results
+    st.session_state.quality_issues = quality_issues
+    st.session_state.quality_summary = quality_summary
+    st.session_state.bias_issues = bias_issues
+    st.session_state.bias_summary = bias_summary
+    st.session_state.analysis_hash = dataset_hash
+else:
+    # Use cached results (instant - no computation!)
+    quality_issues = st.session_state.quality_issues
+    quality_summary = st.session_state.quality_summary
+    bias_issues = st.session_state.bias_issues
+    bias_summary = st.session_state.bias_summary
+
+# ========================================================================
+# PRE-COMPUTE RECOMMENDATIONS FOR "IMPLEMENT CHANGES" TAB
+# ========================================================================
+# Cache recommendations immediately after analysis so tab5 loads instantly
+# Only recompute if quality_issues or bias_issues changed
+current_issues_hash = str(hash(str(quality_issues) + str(bias_issues)))
+if 'issues_hash' not in st.session_state or st.session_state.issues_hash != current_issues_hash:
+        # Collect all recommendations
+        all_recommendations = []
+        
+        # Collect missing value recommendations
+        if quality_issues.get('missing_values'):
+            for col, info in quality_issues['missing_values'].items():
+                for rec in info.get('recommendations', []):
+                    if 'code' in rec and rec.get('priority') not in ['❌ NOT RECOMMENDED', '❌ CRITICAL']:
+                        all_recommendations.append({
+                            'type': 'missing_value',
+                            'column': col,
+                            'method': rec['method'],
+                            'priority': rec['priority'],
+                            'reason': rec['reason'],
+                            'code': rec['code'],
+                            'value': rec.get('value'),
+                            'impact': rec.get('impact', ''),
+                            'key': f"missing_{col}_{rec['method'].replace(' ', '_').lower()}"
+                        })
+        
+        # Collect duplicate recommendations
+        if quality_issues.get('duplicates'):
+            dup = quality_issues['duplicates']
+            if dup.get('recommendation'):
+                rec = dup['recommendation']
+                all_recommendations.append({
+                    'type': 'duplicate',
+                    'column': None,
+                    'method': rec['method'],
+                    'priority': rec['priority'],
+                    'reason': rec['reason'],
+                    'code': rec['code'],
+                    'value': None,
+                    'impact': rec.get('impact', ''),
+                    'key': 'duplicate_remove'
+                })
+        
+        # Collect outlier recommendations
+        if quality_issues.get('outliers'):
+            for col, info in quality_issues['outliers'].items():
+                for rec in info.get('recommendations', []):
+                    if 'code' in rec and rec.get('priority') not in ['❌ NOT RECOMMENDED']:
+                        all_recommendations.append({
+                            'type': 'outlier',
+                            'column': col,
+                            'method': rec['method'],
+                            'priority': rec['priority'],
+                            'reason': rec['reason'],
+                            'code': rec['code'],
+                            'value': None,
+                            'impact': rec.get('impact', ''),
+                            'key': f"outlier_{col}_{rec['method'].replace(' ', '_').lower()}"
+                        })
+        
+        # Collect bias normalization recommendations
+        if bias_issues:
+            for col, info in bias_issues.items():
+                if 'sex' in col.lower() or 'gender' in col.lower():
+                    dist_keys = list(info.get('distribution', {}).keys())
+                    if len(dist_keys) > 2 or any(k not in ['Male', 'Female'] for k in dist_keys):
+                        all_recommendations.append({
+                            'type': 'bias_normalization',
+                            'column': col,
+                            'method': 'Normalize Sex/Gender Values',
+                            'priority': '⭐ RECOMMENDED',
+                            'reason': f'Normalize mixed encodings (Male/Female/M/F/1/0) to standard Male/Female format',
+                            'code': f"# Normalize {col} values",
+                            'value': None,
+                            'impact': 'Ensures consistent demographic representation',
+                            'key': f'bias_normalize_{col}'
+                        })
+        
+        # Collect bias mitigation recommendations from Fairness Specialist (SMOTE, etc.)
+        if 'fairness_recommendations' in st.session_state and st.session_state.fairness_recommendations:
+            for col, fairness_rec in st.session_state.fairness_recommendations.items():
+                # Only add if there's actual bias (imbalance detected)
+                if fairness_rec.severity in ['critical', 'high', 'medium']:
+                    tech_fix = fairness_rec.immediate_technical_fix
+                    all_recommendations.append({
+                        'type': 'bias_mitigation',
+                        'column': col,
+                        'method': tech_fix.method,
+                        'priority': '⭐ RECOMMENDED' if fairness_rec.severity in ['critical', 'high'] else '⚡ OPTIONAL',
+                        'reason': f'Balance {col} distribution using {tech_fix.method}. {fairness_rec.immediate_technical_fix.expected_improvement}',
+                        'code': tech_fix.python_code,
+                        'value': None,
+                        'impact': tech_fix.expected_improvement,
+                        'key': f'bias_mitigation_{col}_{tech_fix.method.lower()}',
+                        'fairness_rec': fairness_rec,  # Store full recommendation for implementation
+                        'distribution': fairness_rec.current_distribution,
+                        'target_distribution': fairness_rec.target_distribution
+                    })
+        
+        # Cache the recommendations and grouped structure
+        st.session_state.cached_recommendations = all_recommendations
+        
+        # Pre-group recommendations by type for faster rendering
+        recommendations_by_type = {}
+        for rec in all_recommendations:
+            rec_type = rec['type']
+            if rec_type not in recommendations_by_type:
+                recommendations_by_type[rec_type] = []
+            recommendations_by_type[rec_type].append(rec)
+        st.session_state.cached_recommendations_grouped = recommendations_by_type
+        
+        st.session_state.issues_hash = current_issues_hash
+
+# Enhanced summary metrics
+col1, col2, col3, col4, col5 = st.columns(5)
+
+with col1:
+    st.metric("📊 Total Records", f"{quality_summary['total_records']:,}")
+with col2:
+    missing_count = quality_summary['missing_value_columns']
+    st.metric("⚠️ Missing Values", missing_count, delta=f"-{missing_count}" if missing_count > 0 else None, delta_color="inverse")
+with col3:
+    dup_count = quality_summary.get('duplicate_records', 0)
+    st.metric("🔄 Duplicates", dup_count, delta=f"-{dup_count}" if dup_count > 0 else None, delta_color="inverse")
+with col4:
+    bias_count = bias_summary['attributes_with_bias']
+    st.metric("⚖️ Bias Detected", bias_count, delta=f"-{bias_count}" if bias_count > 0 else None, delta_color="inverse")
+with col5:
+    total_issues = missing_count + dup_count + bias_count
+    if total_issues == 0:
+        st.metric("🎯 Status", "🟢 Clean")
+    elif total_issues <= 3:
+        st.metric("🎯 Status", "🟡 Minor")
+    else:
+        st.metric("🎯 Status", "🔴 Critical")
+
+# ========================================================================
+# TABS
+# ========================================================================
+
+st.divider()
+
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "🔍 Data Quality + AI Insights",
+    "⚖️ Bias Analysis + Fairness Plan",
+    "📅 Deployment Roadmap",
+    "💬 Ask AI Questions",
+    "🛠️ Implement Changes"
+])
+
+# ========================================================================
+# TAB 1: DATA QUALITY (continued in next artifact section...)
+# ========================================================================
+
+with tab1:
         st.markdown("# 🔍 Data Quality Analysis")
         st.caption("Powered by Statistical Analyzer + Medical Advisor AI")
         
@@ -972,12 +1138,12 @@ with st.spinner("⚙️ Generating synthetic twin..."):
             ✅ <strong>No significant outliers!</strong> Data distribution looks healthy.
             </div>
             """, unsafe_allow_html=True)
-    
-    # ========================================================================
-    # TAB 2: BIAS ANALYSIS + FAIRNESS SPECIALIST
-    # ========================================================================
-    
-    with tab2:
+
+# ========================================================================
+# TAB 2: BIAS ANALYSIS + FAIRNESS SPECIALIST
+# ========================================================================
+
+with tab2:
         st.markdown("# ⚖️ Bias & Fairness Analysis")
         st.caption("Powered by Fairness Specialist AI + Statistical Analysis")
         
@@ -1050,21 +1216,18 @@ with st.spinner("⚙️ Generating synthetic twin..."):
                 
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # Show interpretation
+                # Show interpretation based on bias detection
                 max_pct = max(dist_df['Percentage'])
                 min_pct = min(dist_df['Percentage'])
                 gap = abs(max_pct - min_pct)
                 
-                if gap < 5:
-                    st.success(f"✅ **Well balanced!** Distribution gap: {gap:.1f}% (FDA threshold: <5%)")
-                elif gap < 15:
-                    st.warning(f"⚠️ **Minor imbalance detected.** Gap: {gap:.1f}% (FDA threshold: <5%)")
-                else:
-                    st.error(f"🚨 **Significant imbalance!** Gap: {gap:.1f}% (FDA threshold: <5%)")
-                
                 # Bias recommendations
                 if info['bias_detected']:
-                    st.markdown("---")
+                    # Show gap interpretation only when bias is detected
+                    if gap < 15:
+                        st.warning(f"⚠️ **Minor imbalance detected.** Distribution gap: {gap:.1f}% (FDA threshold: <5%)")
+                    else:
+                        st.error(f"🚨 **Significant imbalance!** Distribution gap: {gap:.1f}% (FDA threshold: <5%)")
                     st.markdown("""
                     <div class="error-box">
                     ⚠️ <strong>BIAS DETECTED - Detailed Issues:</strong>
@@ -1102,6 +1265,11 @@ with st.spinner("⚙️ Generating synthetic twin..."):
                             
                             try:
                                 fairness_rec = fairness_specialist.analyze_bias(bias_data, st.session_state.user_context, stats)
+                                
+                                # Store fairness recommendations in session state for Tab 5 (Implement Changes)
+                                if 'fairness_recommendations' not in st.session_state:
+                                    st.session_state.fairness_recommendations = {}
+                                st.session_state.fairness_recommendations[col] = fairness_rec
                                 
                                 st.success("✅ Exact Fairness Recommendations Generated by AI")
                                 
@@ -1173,7 +1341,11 @@ X_balanced, y_balanced = smote.fit_resample(X, y)""", language='python')
                     else:
                         st.info("Fairness Specialist unavailable - showing statistical metrics only")
                 else:
-                    st.success("✅ Balanced distribution - no bias detected")
+                    # Show success message when no bias detected
+                    max_pct = max(dist_df['Percentage'])
+                    min_pct = min(dist_df['Percentage'])
+                    gap = abs(max_pct - min_pct)
+                    st.success(f"✅ **Well balanced!** Distribution gap: {gap:.1f}% (FDA threshold: <5%)")
         else:
             st.markdown("""
             <div class="info-box">
@@ -1181,12 +1353,12 @@ X_balanced, y_balanced = smote.fit_resample(X, y)""", language='python')
             Looking for columns containing: 'sex', 'gender', 'race', 'ethnicity', 'age'
             </div>
             """, unsafe_allow_html=True)
-    
-    # ========================================================================
-    # TAB 3: DEPLOYMENT ROADMAP
-    # ========================================================================
-    
-    with tab3:
+
+# ========================================================================
+# TAB 3: DEPLOYMENT ROADMAP
+# ========================================================================
+
+with tab3:
         st.markdown("# 📅 Deployment Roadmap")
         st.caption("Powered by Deployment Strategist AI")
         
@@ -1320,12 +1492,12 @@ X_balanced, y_balanced = smote.fit_resample(X, y)""", language='python')
             • Prepare deployment documentation
             </div>
             """, unsafe_allow_html=True)
-    
-    # ========================================================================
-    # TAB 4: INTERACTIVE Q&A
-    # ========================================================================
-    
-    with tab4:
+
+# ========================================================================
+# TAB 4: INTERACTIVE Q&A
+# ========================================================================
+
+with tab4:
         st.markdown("# 💬 Ask the AI Agents")
         st.caption("Get clarification on any recommendation")
         
@@ -1396,8 +1568,568 @@ Be helpful and educational.
                         st.info("Please check your question and try again, or ensure Ollama is running.")
             else:
                 st.warning("Please enter a question first!")
+
+# ========================================================================
+# TAB 5: IMPLEMENT CHANGES
+# ========================================================================
+
+with tab5:
+    st.markdown("# 🛠️ Implement Changes")
+    st.caption("Select recommendations to apply and generate an improved dataset")
     
-    st.session_state.analysis_complete = True
+    # Get pre-computed recommendations from cache (instant - no computation delay!)
+    all_recommendations = st.session_state.get('cached_recommendations', [])
+    
+    if not all_recommendations:
+        st.markdown("""
+        <div class="success-box">
+        ✅ <strong>No recommendations available!</strong><br>
+        Your dataset appears to be clean. No changes needed.
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown(f"""
+        <div class="info-box">
+        📋 <strong>{len(all_recommendations)} recommendations</strong> available for implementation
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("---")
+        st.markdown("### Select Changes to Implement")
+        
+        # Initialize session state for selected recommendations
+        if 'selected_recommendations' not in st.session_state:
+            st.session_state.selected_recommendations = {}
+        
+        # Get pre-grouped recommendations from cache (no computation on rerun!)
+        recommendations_by_type = st.session_state.get('cached_recommendations_grouped', {})
+        
+        # Display recommendations grouped by type
+        for rec_type, recs in recommendations_by_type.items():
+            type_labels = {
+                'missing_value': '📊 Missing Values',
+                'duplicate': '🔄 Duplicates',
+                'outlier': '📈 Outliers',
+                'bias_normalization': '⚖️ Bias Normalization'
+            }
+            
+            with st.expander(f"{type_labels.get(rec_type, rec_type)} ({len(recs)} recommendations)", expanded=True):
+                for rec in recs:
+                    col1, col2 = st.columns([1, 4])
+                    with col1:
+                        # Use Streamlit's built-in state management via key
+                        # The checkbox state is automatically stored in st.session_state[f"checkbox_{rec['key']}"]
+                        checkbox_key = f"checkbox_{rec['key']}"
+                        selected = st.checkbox(
+                            rec['method'],  # Use method name as label for accessibility
+                            value=st.session_state.get(checkbox_key, False),
+                            key=checkbox_key,
+                            label_visibility="collapsed"  # Hide label visually but keep for accessibility
+                        )
+                        # Sync to our tracking dict for easy counting
+                        st.session_state.selected_recommendations[rec['key']] = selected
+                    
+                    with col2:
+                        st.markdown(f"**{rec['method']}** {rec['priority']}")
+                        if rec['column']:
+                            st.caption(f"Column: {rec['column']}")
+                        st.write(f"💡 {rec['reason']}")
+                        if rec['impact']:
+                            st.caption(f"✨ Impact: {rec['impact']}")
+        
+        st.markdown("---")
+        
+        # Count selected recommendations (fast operation, no need to cache)
+        selected_count = sum(1 for v in st.session_state.selected_recommendations.values() if v)
+        
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            if selected_count > 0:
+                st.info(f"✅ {selected_count} change(s) selected for implementation")
+            else:
+                st.warning("⚠️ Please select at least one change to implement")
+        
+        with col2:
+            implement_button = st.button(
+                "🚀 Implement Changes",
+                use_container_width=True,
+                disabled=selected_count == 0
+            )
+        
+        # Implementation logic
+        if implement_button and selected_count > 0:
+            with st.spinner("⚙️ Implementing changes..."):
+                try:
+                    # Create a copy of the synthetic dataset
+                    modified_df = synthetic_df.copy()
+                    applied_changes = []
+                    modified_columns = {}  # Track which columns were modified and how
+                    
+                    # Store original state BEFORE any modifications for accurate before/after comparison
+                    original_state = {}
+                    for col in synthetic_df.columns:
+                        if pd.api.types.is_numeric_dtype(synthetic_df[col]):
+                            original_state[col] = {
+                                'missing': int(synthetic_df[col].isna().sum()),
+                                'mean': float(synthetic_df[col].mean()) if not synthetic_df[col].isna().all() else None,
+                                'min': float(synthetic_df[col].min()) if not synthetic_df[col].isna().all() else None,
+                                'max': float(synthetic_df[col].max()) if not synthetic_df[col].isna().all() else None,
+                                'std': float(synthetic_df[col].std()) if not synthetic_df[col].isna().all() else None
+                            }
+                        else:
+                            original_state[col] = {
+                                'missing': int(synthetic_df[col].isna().sum()),
+                                'value_counts': synthetic_df[col].value_counts().to_dict()
+                            }
+                    
+                    # Apply selected recommendations
+                    for rec in all_recommendations:
+                        if st.session_state.selected_recommendations.get(rec['key'], False):
+                            try:
+                                if rec['type'] == 'missing_value':
+                                    # Track missing values before imputation
+                                    missing_before = modified_df[rec['column']].isna().sum()
+                                    
+                                    # Apply imputation
+                                    if 'Median' in rec['method']:
+                                        value = rec.get('value')
+                                        if value is None:
+                                            # Calculate median if not provided
+                                            value = modified_df[rec['column']].median()
+                                        modified_df[rec['column']].fillna(value, inplace=True)
+                                        missing_after = modified_df[rec['column']].isna().sum()
+                                        applied_changes.append(f"✅ Filled {missing_before} missing values in '{rec['column']}' using {rec['method']} (value: {value:.2f})")
+                                        if missing_before > 0:
+                                            modified_columns[rec['column']] = {
+                                                'type': 'imputation',
+                                                'method': rec['method'],
+                                                'values_filled': missing_before,
+                                                'imputation_value': value
+                                            }
+                                    
+                                    elif 'Mean' in rec['method']:
+                                        value = rec.get('value')
+                                        if value is None:
+                                            # Calculate mean if not provided
+                                            value = modified_df[rec['column']].mean()
+                                        modified_df[rec['column']].fillna(value, inplace=True)
+                                        missing_after = modified_df[rec['column']].isna().sum()
+                                        applied_changes.append(f"✅ Filled {missing_before} missing values in '{rec['column']}' using {rec['method']} (value: {value:.2f})")
+                                        if missing_before > 0:
+                                            modified_columns[rec['column']] = {
+                                                'type': 'imputation',
+                                                'method': rec['method'],
+                                                'values_filled': missing_before,
+                                                'imputation_value': value
+                                            }
+                                    
+                                    elif 'Mode' in rec['method']:
+                                        value = rec.get('value')
+                                        if value is None:
+                                            # Calculate mode if not provided
+                                            mode_values = modified_df[rec['column']].mode()
+                                            value = mode_values[0] if len(mode_values) > 0 else None
+                                        if value is not None:
+                                            modified_df[rec['column']].fillna(value, inplace=True)
+                                            missing_after = modified_df[rec['column']].isna().sum()
+                                            applied_changes.append(f"✅ Filled {missing_before} missing values in '{rec['column']}' using {rec['method']} (value: {value})")
+                                            if missing_before > 0:
+                                                modified_columns[rec['column']] = {
+                                                    'type': 'imputation',
+                                                    'method': rec['method'],
+                                                    'values_filled': missing_before,
+                                                    'imputation_value': value
+                                                }
+                                    
+                                    elif 'Remove' in rec['method']:
+                                        before_count = len(modified_df)
+                                        modified_df.dropna(subset=[rec['column']], inplace=True)
+                                        after_count = len(modified_df)
+                                        rows_removed = before_count - after_count
+                                        applied_changes.append(f"✅ Removed {rows_removed} rows with missing '{rec['column']}'")
+                                        if rows_removed > 0:
+                                            modified_columns[rec['column']] = {
+                                                'type': 'row_removal',
+                                                'rows_removed': rows_removed
+                                            }
+                                
+                                elif rec['type'] == 'duplicate':
+                                    # Remove duplicates
+                                    before_count = len(modified_df)
+                                    modified_df.drop_duplicates(inplace=True)
+                                    after_count = len(modified_df)
+                                    duplicates_removed = before_count - after_count
+                                    applied_changes.append(f"✅ Removed {duplicates_removed} duplicate records")
+                                    if duplicates_removed > 0:
+                                        modified_columns['_duplicates'] = {
+                                            'type': 'duplicate_removal',
+                                            'rows_removed': duplicates_removed
+                                        }
+                                
+                                elif rec['type'] == 'outlier':
+                                    # Handle outliers - for now, we'll use clipping/winsorization if recommended
+                                    if 'Clip' in rec['method'] or 'Winsorize' in rec['method']:
+                                        # Get bounds from quality_issues
+                                        if rec['column'] in quality_issues.get('outliers', {}):
+                                            bounds = quality_issues['outliers'][rec['column']]['bounds']
+                                            # Count outliers before clipping
+                                            outliers_before = ((modified_df[rec['column']] < bounds['lower']) | 
+                                                              (modified_df[rec['column']] > bounds['upper'])).sum()
+                                            modified_df[rec['column']] = modified_df[rec['column']].clip(
+                                                lower=bounds['lower'],
+                                                upper=bounds['upper']
+                                            )
+                                            applied_changes.append(f"✅ Clipped {outliers_before} outliers in '{rec['column']}' to range [{bounds['lower']:.1f}, {bounds['upper']:.1f}]")
+                                            if outliers_before > 0:
+                                                modified_columns[rec['column']] = {
+                                                    'type': 'outlier_clipping',
+                                                    'outliers_clipped': outliers_before,
+                                                    'bounds': bounds
+                                                }
+                                
+                                elif rec['type'] == 'bias_normalization':
+                                    # Normalize sex/gender values
+                                    original_values = modified_df[rec['column']].value_counts().to_dict()
+                                    detector = BiasDetector(modified_df)
+                                    normalized_series = detector._normalize_sex_gender_values(modified_df[rec['column']])
+                                    modified_df[rec['column']] = normalized_series
+                                    normalized_values = modified_df[rec['column']].value_counts().to_dict()
+                                    applied_changes.append(f"✅ Normalized '{rec['column']}' values to standard Male/Female format")
+                                    modified_columns[rec['column']] = {
+                                        'type': 'normalization',
+                                        'before': original_values,
+                                        'after': normalized_values
+                                    }
+                                
+                                elif rec['type'] == 'bias_mitigation':
+                                    # Apply actual bias mitigation (SMOTE, oversampling, etc.)
+                                    col_name = rec['column']
+                                    method = rec['method']
+                                    
+                                    # Store original distribution
+                                    original_dist = modified_df[col_name].value_counts().to_dict()
+                                    original_total = len(modified_df)
+                                    
+                                    if method == 'SMOTE' or 'SMOTE' in method:
+                                        # Apply SMOTE to balance the dataset
+                                        try:
+                                            from imblearn.over_sampling import SMOTE
+                                            
+                                            # Prepare features (X) and target (y) for SMOTE
+                                            X = modified_df.drop(columns=[col_name])
+                                            y = modified_df[col_name]
+                                            
+                                            # Check if we have numeric features for SMOTE
+                                            numeric_cols = X.select_dtypes(include=[np.number]).columns.tolist()
+                                            categorical_cols = X.select_dtypes(exclude=[np.number]).columns.tolist()
+                                            
+                                            if len(numeric_cols) > 0:
+                                                # Use only numeric columns for SMOTE
+                                                X_numeric = X[numeric_cols].values
+                                                
+                                                # Apply SMOTE
+                                                smote = SMOTE(random_state=42)
+                                                X_resampled, y_resampled = smote.fit_resample(X_numeric, y)
+                                                
+                                                # Create new dataframe with resampled numeric features
+                                                resampled_df = pd.DataFrame(X_resampled, columns=numeric_cols)
+                                                resampled_df[col_name] = y_resampled
+                                                
+                                                # Add categorical columns back
+                                                # For original rows (first len(modified_df) rows), use original values
+                                                # For new synthetic rows, sample from minority class
+                                                for cat_col in categorical_cols:
+                                                    resampled_df[cat_col] = None
+                                                
+                                                # Fill original rows with original categorical values
+                                                for idx in range(min(len(modified_df), len(resampled_df))):
+                                                    for cat_col in categorical_cols:
+                                                        resampled_df.loc[idx, cat_col] = modified_df.loc[idx, cat_col]
+                                                
+                                                # Fill new synthetic rows with sampled minority class values
+                                                if len(resampled_df) > len(modified_df):
+                                                    minority_group = y_resampled[len(modified_df)]
+                                                    minority_df = modified_df[modified_df[col_name] == minority_group]
+                                                    
+                                                    for idx in range(len(modified_df), len(resampled_df)):
+                                                        # Sample a random minority row
+                                                        sample_row = minority_df.sample(n=1, random_state=42 + idx).iloc[0]
+                                                        for cat_col in categorical_cols:
+                                                            resampled_df.loc[idx, cat_col] = sample_row[cat_col]
+                                                
+                                                modified_df = resampled_df
+                                                
+                                                new_dist = modified_df[col_name].value_counts().to_dict()
+                                                new_total = len(modified_df)
+                                                samples_added = new_total - original_total
+                                                
+                                                applied_changes.append(f"✅ Applied SMOTE to balance '{col_name}': Added {samples_added} synthetic samples")
+                                                modified_columns[col_name] = {
+                                                    'type': 'bias_mitigation',
+                                                    'method': 'SMOTE',
+                                                    'before': original_dist,
+                                                    'after': new_dist,
+                                                    'samples_added': samples_added
+                                                }
+                                            else:
+                                                # Fallback to simple oversampling if no numeric features
+                                                value_counts = modified_df[col_name].value_counts()
+                                                majority_count = value_counts.max()
+                                                minority_group = value_counts.idxmin()
+                                                minority_df = modified_df[modified_df[col_name] == minority_group]
+                                                samples_needed = majority_count - len(minority_df)
+                                                oversampled = minority_df.sample(n=samples_needed, replace=True, random_state=42)
+                                                modified_df = pd.concat([modified_df, oversampled]).reset_index(drop=True)
+                                                
+                                                new_dist = modified_df[col_name].value_counts().to_dict()
+                                                samples_added = len(modified_df) - original_total
+                                                
+                                                applied_changes.append(f"✅ Applied oversampling to balance '{col_name}': Added {samples_added} samples")
+                                                modified_columns[col_name] = {
+                                                    'type': 'bias_mitigation',
+                                                    'method': 'oversampling',
+                                                    'before': original_dist,
+                                                    'after': new_dist,
+                                                    'samples_added': samples_added
+                                                }
+                                        
+                                        except ImportError:
+                                            applied_changes.append(f"❌ SMOTE not available. Install: pip install imbalanced-learn")
+                                        except Exception as e:
+                                            applied_changes.append(f"❌ SMOTE failed: {str(e)}")
+                                    
+                                    elif method == 'class_weighting':
+                                        # Class weighting doesn't modify the dataset, just the model
+                                        # So we'll skip this for dataset modification
+                                        applied_changes.append(f"ℹ️ Class weighting applied (affects model training, not dataset)")
+                                    
+                                    elif method == 'undersampling':
+                                        # Undersample majority class
+                                        try:
+                                            # Find majority and minority groups
+                                            value_counts = modified_df[col_name].value_counts()
+                                            majority_group = value_counts.idxmax()
+                                            minority_group = value_counts.idxmin()
+                                            minority_count = value_counts[minority_group]
+                                            
+                                            # Keep all minority samples, randomly sample majority to match
+                                            minority_df = modified_df[modified_df[col_name] == minority_group]
+                                            majority_df = modified_df[modified_df[col_name] == majority_group]
+                                            majority_sampled = majority_df.sample(n=minority_count, random_state=42)
+                                            
+                                            modified_df = pd.concat([minority_df, majority_sampled]).reset_index(drop=True)
+                                            
+                                            new_dist = modified_df[col_name].value_counts().to_dict()
+                                            rows_removed = original_total - len(modified_df)
+                                            
+                                            applied_changes.append(f"✅ Applied undersampling to '{col_name}': Removed {rows_removed} majority samples")
+                                            modified_columns[col_name] = {
+                                                'type': 'bias_mitigation',
+                                                'method': 'undersampling',
+                                                'before': original_dist,
+                                                'after': new_dist,
+                                                'rows_removed': rows_removed
+                                            }
+                                        
+                                        except Exception as e:
+                                            applied_changes.append(f"❌ Undersampling failed: {str(e)}")
+                            
+                            except Exception as e:
+                                applied_changes.append(f"❌ Failed to apply {rec['method']}: {str(e)}")
+                    
+                    # Store modified dataset in session state
+                    st.session_state.modified_dataset = modified_df
+                    st.session_state.applied_changes = applied_changes
+                    
+                    st.success(f"✅ Successfully applied {len([c for c in applied_changes if c.startswith('✅')])} change(s)!")
+                    
+                    # Show applied changes
+                    st.markdown("### 📋 Applied Changes:")
+                    for change in applied_changes:
+                        if change.startswith('✅'):
+                            st.success(change)
+                        else:
+                            st.error(change)
+                    
+                    # Show dataset summary
+                    st.markdown("---")
+                    st.markdown("### 📊 Modified Dataset Summary:")
+                    
+                    # Calculate actual changes
+                    original_count = len(synthetic_df)
+                    new_count = len(modified_df)
+                    delta = new_count - original_count
+                    total_values_changed = sum(col_info.get('values_filled', 0) + col_info.get('outliers_clipped', 0) 
+                                             for col_info in modified_columns.values() if isinstance(col_info, dict))
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Total Records", f"{len(modified_df):,}", delta=f"{delta:+,}" if delta != 0 else None)
+                    with col2:
+                        st.metric("Features", len(modified_df.columns))
+                    with col3:
+                        st.metric("Columns Modified", len([k for k in modified_columns.keys() if k != '_duplicates']))
+                    with col4:
+                        if total_values_changed > 0:
+                            st.metric("Values Changed", f"{total_values_changed:,}", delta=f"+{total_values_changed:,}")
+                        else:
+                            st.metric("Values Changed", "0")
+                    
+                    # Show detailed changes if any columns were modified
+                    if modified_columns:
+                        st.markdown("---")
+                        st.markdown("### 🔍 Detailed Changes:")
+                        
+                        for col_name, col_info in modified_columns.items():
+                            if col_name == '_duplicates':
+                                st.markdown(f"**🔄 Duplicate Records:**")
+                                st.write(f"  • Removed {col_info['rows_removed']} duplicate rows")
+                            elif col_info['type'] == 'imputation':
+                                st.markdown(f"**📊 Column: `{col_name}`**")
+                                st.write(f"  • **Action:** Filled {col_info['values_filled']} missing values")
+                                st.write(f"  • **Method:** {col_info['method']}")
+                                st.write(f"  • **Imputation Value:** {col_info['imputation_value']}")
+                                
+                                # Show before/after stats
+                                col_before, col_after = st.columns(2)
+                                with col_before:
+                                    st.caption("**Before:**")
+                                    missing_before = synthetic_df[col_name].isna().sum()
+                                    st.write(f"  • Missing: {missing_before}")
+                                    if not synthetic_df[col_name].isna().all():
+                                        st.write(f"  • Mean: {synthetic_df[col_name].mean():.2f}")
+                                with col_after:
+                                    st.caption("**After:**")
+                                    missing_after = modified_df[col_name].isna().sum()
+                                    st.write(f"  • Missing: {missing_after}")
+                                    st.write(f"  • Mean: {modified_df[col_name].mean():.2f}")
+                            
+                            elif col_info['type'] == 'outlier_clipping':
+                                st.markdown(f"**📈 Column: `{col_name}`**")
+                                st.write(f"  • **Action:** Clipped {col_info['outliers_clipped']} outliers")
+                                st.write(f"  • **Range:** [{col_info['bounds']['lower']:.1f}, {col_info['bounds']['upper']:.1f}]")
+                                
+                                col_before, col_after = st.columns(2)
+                                with col_before:
+                                    st.caption("**Before:**")
+                                    orig = original_state.get(col_name, {})
+                                    if orig.get('min') is not None:
+                                        st.write(f"  • Min: {orig['min']:.2f}")
+                                        st.write(f"  • Max: {orig['max']:.2f}")
+                                        st.write(f"  • Mean: {orig.get('mean', 0):.2f}")
+                                with col_after:
+                                    st.caption("**After:**")
+                                    min_after = modified_df[col_name].min()
+                                    max_after = modified_df[col_name].max()
+                                    mean_after = modified_df[col_name].mean()
+                                    st.write(f"  • Min: {min_after:.2f} {'✅' if orig.get('min') and min_after != orig['min'] else ''}")
+                                    st.write(f"  • Max: {max_after:.2f} {'✅' if orig.get('max') and max_after != orig['max'] else ''}")
+                                    st.write(f"  • Mean: {mean_after:.2f}")
+                                    st.write(f"  • **Outliers Clipped:** {col_info['outliers_clipped']}")
+                            
+                            elif col_info['type'] == 'normalization':
+                                st.markdown(f"**⚖️ Column: `{col_name}`**")
+                                st.write(f"  • **Action:** Normalized sex/gender values to standard Male/Female format")
+                                
+                                col_before, col_after = st.columns(2)
+                                with col_before:
+                                    st.caption("**Before (Mixed Encodings):**")
+                                    orig = original_state.get(col_name, {})
+                                    if 'value_counts' in orig:
+                                        total_before = sum(orig['value_counts'].values())
+                                        for val, count in sorted(orig['value_counts'].items(), key=lambda x: x[1], reverse=True):
+                                            pct = (count / total_before) * 100 if total_before > 0 else 0
+                                            st.write(f"  • `{val}`: {count} ({pct:.1f}%)")
+                                    elif 'before' in col_info:
+                                        total_before = sum(col_info['before'].values())
+                                        for val, count in sorted(col_info['before'].items(), key=lambda x: x[1], reverse=True):
+                                            pct = (count / total_before) * 100 if total_before > 0 else 0
+                                            st.write(f"  • `{val}`: {count} ({pct:.1f}%)")
+                                with col_after:
+                                    st.caption("**After (Standardized):**")
+                                    after_counts = modified_df[col_name].value_counts().to_dict()
+                                    total_after = sum(after_counts.values())
+                                    for val, count in sorted(after_counts.items(), key=lambda x: x[1], reverse=True):
+                                        pct = (count / total_after) * 100 if total_after > 0 else 0
+                                        st.write(f"  • `{val}`: {count} ({pct:.1f}%) {'✅' if val in ['Male', 'Female'] else ''}")
+                                    # Show how many unique values were normalized
+                                    if 'before' in col_info:
+                                        before_unique = len(col_info['before'])
+                                        after_unique = len(after_counts)
+                                        if before_unique > after_unique:
+                                            st.success(f"  **Normalized:** {before_unique} → {after_unique} unique values")
+                                
+                            elif col_info['type'] == 'bias_mitigation':
+                                st.markdown(f"**⚖️ Column: `{col_name}`**")
+                                method = col_info.get('method', 'Unknown')
+                                st.write(f"  • **Action:** Applied {method} to balance distribution")
+                                
+                                if 'samples_added' in col_info:
+                                    st.write(f"  • **Samples Added:** {col_info['samples_added']:,} synthetic samples")
+                                elif 'rows_removed' in col_info:
+                                    st.write(f"  • **Rows Removed:** {col_info['rows_removed']:,} majority samples")
+                                
+                                col_before, col_after = st.columns(2)
+                                with col_before:
+                                    st.caption("**Before (Imbalanced):**")
+                                    if 'before' in col_info:
+                                        total_before = sum(col_info['before'].values())
+                                        for val, count in sorted(col_info['before'].items(), key=lambda x: x[1], reverse=True):
+                                            pct = (count / total_before) * 100 if total_before > 0 else 0
+                                            st.write(f"  • `{val}`: {count:,} ({pct:.1f}%)")
+                                
+                                with col_after:
+                                    st.caption("**After (Balanced):**")
+                                    if 'after' in col_info:
+                                        total_after = sum(col_info['after'].values())
+                                        for val, count in sorted(col_info['after'].items(), key=lambda x: x[1], reverse=True):
+                                            pct = (count / total_after) * 100 if total_after > 0 else 0
+                                            # Show improvement indicator
+                                            if 'before' in col_info and val in col_info['before']:
+                                                before_pct = (col_info['before'][val] / sum(col_info['before'].values())) * 100
+                                                improvement = pct - before_pct
+                                                indicator = "✅" if abs(pct - 50) < abs(before_pct - 50) else ""
+                                                st.write(f"  • `{val}`: {count:,} ({pct:.1f}%) {indicator} {f'({improvement:+.1f}%)' if abs(improvement) > 0.1 else ''}")
+                                            else:
+                                                st.write(f"  • `{val}`: {count:,} ({pct:.1f}%) ✅")
+                                    
+                                    # Calculate balance improvement
+                                    if 'before' in col_info and 'after' in col_info:
+                                        before_values = list(col_info['before'].values())
+                                        after_values = list(col_info['after'].values())
+                                        if len(before_values) >= 2 and len(after_values) >= 2:
+                                            before_gap = max(before_values) - min(before_values)
+                                            after_gap = max(after_values) - min(after_values)
+                                            gap_reduction = before_gap - after_gap
+                                            if gap_reduction > 0:
+                                                st.success(f"  **Balance Gap Reduced:** {gap_reduction:.1f}%")
+                                
+                                st.markdown("---")
+                            
+                            st.markdown("---")
+                    else:
+                        st.info("ℹ️ No data values were modified. Selected changes may have been redundant or already applied.")
+                    
+                    # Download button
+                    st.markdown("---")
+                    csv_data = modified_df.to_csv(index=False)
+                    st.download_button(
+                        label="💾 Download Modified Dataset (CSV)",
+                        data=csv_data,
+                        file_name=f"improved_dataset_{len(modified_df)}_records.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+                    
+                    # Show sample of modified data
+                    with st.expander("📊 Preview Modified Dataset", expanded=False):
+                        st.dataframe(modified_df.head(10), use_container_width=True)
+                
+                except Exception as e:
+                    st.error(f"❌ Error implementing changes: {str(e)}")
+                    st.exception(e)
+
+st.session_state.analysis_complete = True
 
 # ============================================================================
 # FOOTER
