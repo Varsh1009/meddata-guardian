@@ -128,7 +128,7 @@ Create a SPECIFIC week-by-week plan as JSON:
       "days_range": "Days 1-7",
       "tasks": ["Specific task 1", "Specific task 2"],
       "deliverables": ["Deliverable 1"],
-      "estimated_hours": 20
+      "estimated_hours": 20  // MUST be an integer >= 1 (not a float like 2.5)
     }},
     // Continue for user's timeline
   ],
@@ -148,6 +148,7 @@ Create a SPECIFIC week-by-week plan as JSON:
 }}
 
 Make tasks SPECIFIC and ACTIONABLE. Include exact numbers.
+IMPORTANT: estimated_hours must be an INTEGER >= 1 (not a float). Use whole numbers like 8, 16, 20, not 2.5 or 1.75.
 Respond with ONLY valid JSON.
 """
         
@@ -166,6 +167,21 @@ Respond with ONLY valid JSON.
                 response_text = response_text.split('```')[1].split('```')[0].strip()
             
             result = json.loads(response_text)
+            
+            # Sanitize estimated_hours: convert floats to ints, ensure >= 1
+            if 'weekly_plan' in result:
+                for week in result['weekly_plan']:
+                    if 'estimated_hours' in week:
+                        hours = week['estimated_hours']
+                        if hours is not None:
+                            # Convert float to int (round)
+                            if isinstance(hours, float):
+                                hours = int(round(hours))
+                            # Ensure >= 1, otherwise set to None
+                            if hours < 1:
+                                hours = None
+                            week['estimated_hours'] = hours
+            
             validated = DeploymentPlanSchema(**result)
             
             print("✅ Deployment plan generated")

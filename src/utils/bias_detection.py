@@ -30,28 +30,86 @@ class BiasDetector:
     
     def run_full_analysis(self) -> Dict:
         """Run all bias checks"""
-        print("⚖️ Running bias detection...")
         self.analyze_demographic_balance()
         return self.bias_issues
+    
+    def _normalize_sex_gender_values(self, series: pd.Series) -> pd.Series:
+        """
+        Normalize sex/gender values to standard format.
+        Maps: Male/M/male/1 -> Male, Female/F/female/0 -> Female
+        """
+        # Convert to string for consistent processing
+        normalized = series.astype(str).str.strip()
+        
+        # Define all possible male and female variants (case-insensitive)
+        male_variants = ['male', 'm', '1', '1.0', '1.00', '1.000']
+        female_variants = ['female', 'f', '0', '0.0', '0.00', '0.000']
+        
+        # Create mapping dictionary for all unique values
+        mapping = {}
+        for val in normalized.unique():
+            val_lower = str(val).lower().strip()
+            # Handle NaN/null values
+            if pd.isna(val) or val_lower in ['nan', 'none', 'null', '']:
+                mapping[val] = val  # Keep as-is
+            elif val_lower in male_variants:
+                mapping[val] = 'Male'
+            elif val_lower in female_variants:
+                mapping[val] = 'Female'
+            else:
+                # Keep original if not recognized (might be other categories)
+                mapping[val] = val
+        
+        return normalized.map(mapping)
     
     def analyze_demographic_balance(self):
         """Check demographic representation"""
         demographic_cols = [c for c in self.df.columns if any(k in c.lower() for k in ['sex', 'gender', 'race', 'ethnicity'])]
         
         for col in demographic_cols:
-            distribution = self.df[col].value_counts(normalize=True) * 100
+            # Normalize sex/gender columns before calculating distribution
+            if 'sex' in col.lower() or 'gender' in col.lower():
+                normalized_series = self._normalize_sex_gender_values(self.df[col])
+                distribution = normalized_series.value_counts(normalize=True) * 100
+            else:
+                distribution = self.df[col].value_counts(normalize=True) * 100
+            
             benchmark = self.benchmarks.get(col.lower())
             
             issues = []
-            for group, pct in distribution.items():
-                if pct < 20:
-                    issues.append(f"{group}: {pct:.1f}%")
+            # Convert Series to list of values - use .values property (not method)
+            dist_values = list(distribution.values)
             
-            # Check for missing groups
-            if benchmark:
-                for group in benchmark.keys():
-                    if group not in distribution.index:
-                        issues.append(f"{group}: 0% MISSING")
+            # For binary distributions (sex/gender), check if gap > 5% (FDA threshold)
+            if 'sex' in col.lower() or 'gender' in col.lower():
+                if len(dist_values) == 2:
+                    gap = abs(dist_values[0] - dist_values[1])
+                    if gap > 5:  # FDA threshold for binary balance
+                        max_pct = max(dist_values)
+                        min_pct = min(dist_values)
+                        max_group = distribution.idxmax()
+                        min_group = distribution.idxmin()
+                        issues.append(f"{min_group}: {min_pct:.1f}% (underrepresented, gap: {gap:.1f}%)")
+                        issues.append(f"{max_group}: {max_pct:.1f}% (overrepresented)")
+                else:
+                    # More than 2 groups - flag any < 20%
+                    for group, pct in distribution.items():
+                        if pct < 20:
+                            issues.append(f"{group}: {pct:.1f}% (underrepresented)")
+            else:
+                # For multi-group distributions (race/ethnicity), check against benchmarks
+                if benchmark:
+                    for group, expected_pct in benchmark.items():
+                        actual_pct = distribution.get(group, 0)
+                        if actual_pct == 0:
+                            issues.append(f"{group}: 0% MISSING (expected: {expected_pct}%)")
+                        elif actual_pct < expected_pct * 0.5:  # Less than 50% of expected
+                            issues.append(f"{group}: {actual_pct:.1f}% (expected: {expected_pct}%, underrepresented)")
+                else:
+                    # No benchmark - flag any group < 20%
+                    for group, pct in distribution.items():
+                        if pct < 20:
+                            issues.append(f"{group}: {pct:.1f}% (underrepresented)")
             
             self.bias_issues[col] = {
                 'distribution': distribution.to_dict(),
