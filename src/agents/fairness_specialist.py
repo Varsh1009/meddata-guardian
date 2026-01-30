@@ -7,6 +7,7 @@ import ollama
 from pydantic import BaseModel, Field
 from typing import Dict, List, Literal, Optional
 import json
+import re
 import sys
 import os
 
@@ -203,7 +204,7 @@ Provide response as valid JSON matching this EXACT structure:
     "method": "SMOTE",
     "python_code": "from imblearn.over_sampling import SMOTE\\nsmote = SMOTE()\\nX_res, y_res = smote.fit_resample(X, y)",
     "expected_improvement": "Women accuracy: 71% → 84%",
-    "limitations": "Synthetic data limitation..."
+    "limitations": "Synthetic data may not capture all real-world variation. SMOTE creates synthetic samples based on existing patterns, which may not fully represent true demographic diversity."
   }},
   
   "fits_user_timeline": false,
@@ -217,8 +218,16 @@ CRITICAL RULES:
 - Cost estimates should be reasonable ($20K-$100K range)
 - Give SPECIFIC python code that works
 - Explain why recommendation fits user's constraints
+- IMPORTANT: patients_affected_per_100 must be an INTEGER 0-100 (not a float like 6.5 or 32.75). Use whole numbers like 6, 33, 11.
 
-Respond with ONLY valid JSON, no other text.
+CRITICAL JSON FORMAT REQUIREMENTS:
+- Use double quotes for all strings (not single quotes)
+- No trailing commas before closing braces }} or brackets ]
+- All keys must be in double quotes
+- Ensure proper comma placement between JSON elements
+- No comments or extra text outside the JSON object
+
+Respond with ONLY valid JSON, no other text. Start with {{ and end with }}.
 """
         
         try:
@@ -233,14 +242,49 @@ Respond with ONLY valid JSON, no other text.
             
             response_text = response['response'].strip()
             
-            # Clean JSON
+            # Clean JSON - multiple strategies
             if '```json' in response_text:
                 response_text = response_text.split('```json')[1].split('```')[0].strip()
             elif '```' in response_text:
                 response_text = response_text.split('```')[1].split('```')[0].strip()
             
+            # Try to extract JSON object if there's extra text
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                response_text = json_match.group(0)
+            
+            # Try to fix common JSON issues
+            original_text = response_text  # Keep original for error reporting
+            # Remove trailing commas before closing braces/brackets
+            response_text = re.sub(r',(\s*[}\]])', r'\1', response_text)
+            # Fix single quotes to double quotes (basic - only for simple cases)
+            response_text = re.sub(r"'([^']*)':", r'"\1":', response_text)
+            response_text = re.sub(r":\s*'([^']*)'", r': "\1"', response_text)
+            
             # Parse and validate
-            result = json.loads(response_text)
+            try:
+                result = json.loads(response_text)
+            except json.JSONDecodeError as json_err:
+                # If repair failed, try original text
+                try:
+                    result = json.loads(original_text)
+                except:
+                    # Log the problematic JSON for debugging
+                    print(f"   JSON parse error at position {json_err.pos}: {json_err.msg}")
+                    print(f"   Problematic JSON snippet: {response_text[max(0, json_err.pos-50):json_err.pos+50]}")
+                    raise json_err
+            
+            # Sanitize patients_affected_per_100: convert floats to ints, ensure 0-100
+            if 'predicted_harm' in result and 'patients_affected_per_100' in result['predicted_harm']:
+                patients = result['predicted_harm']['patients_affected_per_100']
+                if patients is not None:
+                    # Convert float to int (round)
+                    if isinstance(patients, float):
+                        patients = int(round(patients))
+                    # Ensure within valid range
+                    patients = max(0, min(100, patients))
+                    result['predicted_harm']['patients_affected_per_100'] = patients
+            
             validated = FairnessRecommendationSchema(**result)
             
             print("✅ Structured fairness recommendation generated")
