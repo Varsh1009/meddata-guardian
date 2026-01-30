@@ -7,6 +7,26 @@ import os
 from typing import List, Dict
 import chromadb
 from chromadb.utils import embedding_functions
+import ollama
+from chromadb.api.types import Embeddings, EmbeddingFunction
+
+
+class CustomOllamaEmbeddingFunction(EmbeddingFunction):
+    """
+    Custom Ollama embedding function that uses the correct API (embeddings() not embed())
+    Fixes compatibility issue between ChromaDB 1.4.1 and Ollama client 0.1.6
+    """
+    def __init__(self, url: str = "http://localhost:11434", model_name: str = "llama3.2:3b"):
+        self.client = ollama.Client(host=url)
+        self.model_name = model_name
+    
+    def __call__(self, input: List[str]) -> Embeddings:
+        """Generate embeddings using Ollama's embeddings() method"""
+        embeddings = []
+        for text in input:
+            response = self.client.embeddings(model=self.model_name, prompt=text)
+            embeddings.append(response['embedding'])
+        return embeddings
 
 
 class MedicalKnowledgeBase:
@@ -22,9 +42,11 @@ class MedicalKnowledgeBase:
         self.client = chromadb.Client()
         
         # Use Ollama for embeddings (runs locally)
-        self.embedding_function = embedding_functions.OllamaEmbeddingFunction(
-            model_name="llama3.2:3b",
-            url="http://localhost:11434/api/embeddings"
+        # Use custom embedding function to fix API compatibility issue
+        # ChromaDB's OllamaEmbeddingFunction uses client.embed() but Ollama client has embeddings()
+        self.embedding_function = CustomOllamaEmbeddingFunction(
+            url="http://localhost:11434",
+            model_name="llama3.2:3b"
         )
         
         # Create or get collection

@@ -21,7 +21,7 @@ ollama==0.1.6
 pydantic==2.5.3
 
 # RAG & Vector Store
-chromadb==0.4.22
+chromadb>=1.0.0  # Updated: 0.4.22 doesn't have OllamaEmbeddingFunction, 1.0.0+ required
 sentence-transformers==2.3.1
 langchain==0.1.0
 

@@ -849,114 +849,156 @@ else:
 # ========================================================================
 # Cache recommendations immediately after analysis so tab5 loads instantly
 # Only recompute if quality_issues or bias_issues changed
+
+def _collect_all_recommendations():
+    """Collect all recommendations including quality, bias normalization, and bias mitigation"""
+    quality_issues = st.session_state.get('quality_issues', {})
+    bias_issues = st.session_state.get('bias_issues', {})
+    
+    all_recommendations = []
+    
+    # Collect missing value recommendations
+    if quality_issues.get('missing_values'):
+        for col, info in quality_issues['missing_values'].items():
+            for rec in info.get('recommendations', []):
+                if 'code' in rec and rec.get('priority') not in ['❌ NOT RECOMMENDED', '❌ CRITICAL']:
+                    all_recommendations.append({
+                        'type': 'missing_value',
+                        'column': col,
+                        'method': rec['method'],
+                        'priority': rec['priority'],
+                        'reason': rec['reason'],
+                        'code': rec['code'],
+                        'value': rec.get('value'),
+                        'impact': rec.get('impact', ''),
+                        'key': f"missing_{col}_{rec['method'].replace(' ', '_').lower()}"
+                    })
+    
+    # Collect duplicate recommendations
+    if quality_issues.get('duplicates'):
+        dup = quality_issues['duplicates']
+        if dup.get('recommendation'):
+            rec = dup['recommendation']
+            all_recommendations.append({
+                'type': 'duplicate',
+                'column': None,
+                'method': rec['method'],
+                'priority': rec['priority'],
+                'reason': rec['reason'],
+                'code': rec['code'],
+                'value': None,
+                'impact': rec.get('impact', ''),
+                'key': 'duplicate_remove'
+            })
+    
+    # Collect outlier recommendations
+    if quality_issues.get('outliers'):
+        for col, info in quality_issues['outliers'].items():
+            for rec in info.get('recommendations', []):
+                if 'code' in rec and rec.get('priority') not in ['❌ NOT RECOMMENDED']:
+                    all_recommendations.append({
+                        'type': 'outlier',
+                        'column': col,
+                        'method': rec['method'],
+                        'priority': rec['priority'],
+                        'reason': rec['reason'],
+                        'code': rec['code'],
+                        'value': None,
+                        'impact': rec.get('impact', ''),
+                        'key': f"outlier_{col}_{rec['method'].replace(' ', '_').lower()}"
+                    })
+    
+    # Collect bias normalization recommendations
+    if bias_issues:
+        for col, info in bias_issues.items():
+            if 'sex' in col.lower() or 'gender' in col.lower():
+                dist_keys = list(info.get('distribution', {}).keys())
+                if len(dist_keys) > 2 or any(k not in ['Male', 'Female'] for k in dist_keys):
+                    all_recommendations.append({
+                        'type': 'bias_normalization',
+                        'column': col,
+                        'method': 'Normalize Sex/Gender Values',
+                        'priority': '⭐ RECOMMENDED',
+                        'reason': f'Normalize mixed encodings (Male/Female/M/F/1/0) to standard Male/Female format',
+                        'code': f"# Normalize {col} values",
+                        'value': None,
+                        'impact': 'Ensures consistent demographic representation',
+                        'key': f'bias_normalize_{col}'
+                    })
+    
+    # Collect bias mitigation recommendations from Fairness Specialist (SMOTE, etc.)
+    if 'fairness_recommendations' in st.session_state and st.session_state.fairness_recommendations:
+        for col, fairness_rec in st.session_state.fairness_recommendations.items():
+            # Only add if there's actual bias (imbalance detected)
+            if fairness_rec.severity in ['critical', 'high', 'medium']:
+                tech_fix = fairness_rec.immediate_technical_fix
+                all_recommendations.append({
+                    'type': 'bias_mitigation',
+                    'column': col,
+                    'method': tech_fix.method,
+                    'priority': '⭐ RECOMMENDED' if fairness_rec.severity in ['critical', 'high'] else '⚡ OPTIONAL',
+                    'reason': f'Balance {col} distribution using {tech_fix.method}. {fairness_rec.immediate_technical_fix.expected_improvement}',
+                    'code': tech_fix.python_code,
+                    'value': None,
+                    'impact': tech_fix.expected_improvement,
+                    'key': f'bias_mitigation_{col}_{tech_fix.method.lower()}',
+                    'fairness_rec': fairness_rec,  # Store full recommendation for implementation
+                    'distribution': fairness_rec.current_distribution,
+                    'target_distribution': fairness_rec.target_distribution
+                })
+    
+    # Also add basic bias mitigation recommendations directly from bias_issues
+    # (in case Fairness Specialist hasn't run yet or failed)
+    if bias_issues:
+        for col, info in bias_issues.items():
+            if info.get('bias_detected', False):
+                # Check if we already have a recommendation for this column
+                has_recommendation = any(
+                    rec.get('column') == col and rec.get('type') == 'bias_mitigation'
+                    for rec in all_recommendations
+                )
+                if not has_recommendation:
+                    # Add basic SMOTE recommendation
+                    dist_values = list(info.get('distribution', {}).values())
+                    if len(dist_values) >= 2:
+                        gap = abs(max(dist_values) - min(dist_values))
+                        if gap > 5:  # Significant imbalance
+                            all_recommendations.append({
+                                'type': 'bias_mitigation',
+                                'column': col,
+                                'method': 'SMOTE',
+                                'priority': '⭐ RECOMMENDED',
+                                'reason': f'Balance {col} distribution (current gap: {gap:.1f}%)',
+                                'code': 'from imblearn.over_sampling import SMOTE\nsmote = SMOTE(random_state=42)\nX_balanced, y_balanced = smote.fit_resample(X, y)',
+                                'value': None,
+                                'impact': f'Reduce distribution gap from {gap:.1f}% to <5%',
+                                'key': f'bias_mitigation_{col}_smote'
+                            })
+    
+    # Cache the recommendations and grouped structure
+    st.session_state.cached_recommendations = all_recommendations
+    
+    # Pre-group recommendations by type for faster rendering
+    recommendations_by_type = {}
+    for rec in all_recommendations:
+        rec_type = rec['type']
+        if rec_type not in recommendations_by_type:
+            recommendations_by_type[rec_type] = []
+        recommendations_by_type[rec_type].append(rec)
+    st.session_state.cached_recommendations_grouped = recommendations_by_type
+
+# Collect recommendations initially
 current_issues_hash = str(hash(str(quality_issues) + str(bias_issues)))
 if 'issues_hash' not in st.session_state or st.session_state.issues_hash != current_issues_hash:
-        # Collect all recommendations
-        all_recommendations = []
-        
-        # Collect missing value recommendations
-        if quality_issues.get('missing_values'):
-            for col, info in quality_issues['missing_values'].items():
-                for rec in info.get('recommendations', []):
-                    if 'code' in rec and rec.get('priority') not in ['❌ NOT RECOMMENDED', '❌ CRITICAL']:
-                        all_recommendations.append({
-                            'type': 'missing_value',
-                            'column': col,
-                            'method': rec['method'],
-                            'priority': rec['priority'],
-                            'reason': rec['reason'],
-                            'code': rec['code'],
-                            'value': rec.get('value'),
-                            'impact': rec.get('impact', ''),
-                            'key': f"missing_{col}_{rec['method'].replace(' ', '_').lower()}"
-                        })
-        
-        # Collect duplicate recommendations
-        if quality_issues.get('duplicates'):
-            dup = quality_issues['duplicates']
-            if dup.get('recommendation'):
-                rec = dup['recommendation']
-                all_recommendations.append({
-                    'type': 'duplicate',
-                    'column': None,
-                    'method': rec['method'],
-                    'priority': rec['priority'],
-                    'reason': rec['reason'],
-                    'code': rec['code'],
-                    'value': None,
-                    'impact': rec.get('impact', ''),
-                    'key': 'duplicate_remove'
-                })
-        
-        # Collect outlier recommendations
-        if quality_issues.get('outliers'):
-            for col, info in quality_issues['outliers'].items():
-                for rec in info.get('recommendations', []):
-                    if 'code' in rec and rec.get('priority') not in ['❌ NOT RECOMMENDED']:
-                        all_recommendations.append({
-                            'type': 'outlier',
-                            'column': col,
-                            'method': rec['method'],
-                            'priority': rec['priority'],
-                            'reason': rec['reason'],
-                            'code': rec['code'],
-                            'value': None,
-                            'impact': rec.get('impact', ''),
-                            'key': f"outlier_{col}_{rec['method'].replace(' ', '_').lower()}"
-                        })
-        
-        # Collect bias normalization recommendations
-        if bias_issues:
-            for col, info in bias_issues.items():
-                if 'sex' in col.lower() or 'gender' in col.lower():
-                    dist_keys = list(info.get('distribution', {}).keys())
-                    if len(dist_keys) > 2 or any(k not in ['Male', 'Female'] for k in dist_keys):
-                        all_recommendations.append({
-                            'type': 'bias_normalization',
-                            'column': col,
-                            'method': 'Normalize Sex/Gender Values',
-                            'priority': '⭐ RECOMMENDED',
-                            'reason': f'Normalize mixed encodings (Male/Female/M/F/1/0) to standard Male/Female format',
-                            'code': f"# Normalize {col} values",
-                            'value': None,
-                            'impact': 'Ensures consistent demographic representation',
-                            'key': f'bias_normalize_{col}'
-                        })
-        
-        # Collect bias mitigation recommendations from Fairness Specialist (SMOTE, etc.)
-        if 'fairness_recommendations' in st.session_state and st.session_state.fairness_recommendations:
-            for col, fairness_rec in st.session_state.fairness_recommendations.items():
-                # Only add if there's actual bias (imbalance detected)
-                if fairness_rec.severity in ['critical', 'high', 'medium']:
-                    tech_fix = fairness_rec.immediate_technical_fix
-                    all_recommendations.append({
-                        'type': 'bias_mitigation',
-                        'column': col,
-                        'method': tech_fix.method,
-                        'priority': '⭐ RECOMMENDED' if fairness_rec.severity in ['critical', 'high'] else '⚡ OPTIONAL',
-                        'reason': f'Balance {col} distribution using {tech_fix.method}. {fairness_rec.immediate_technical_fix.expected_improvement}',
-                        'code': tech_fix.python_code,
-                        'value': None,
-                        'impact': tech_fix.expected_improvement,
-                        'key': f'bias_mitigation_{col}_{tech_fix.method.lower()}',
-                        'fairness_rec': fairness_rec,  # Store full recommendation for implementation
-                        'distribution': fairness_rec.current_distribution,
-                        'target_distribution': fairness_rec.target_distribution
-                    })
-        
-        # Cache the recommendations and grouped structure
-        st.session_state.cached_recommendations = all_recommendations
-        
-        # Pre-group recommendations by type for faster rendering
-        recommendations_by_type = {}
-        for rec in all_recommendations:
-            rec_type = rec['type']
-            if rec_type not in recommendations_by_type:
-                recommendations_by_type[rec_type] = []
-            recommendations_by_type[rec_type].append(rec)
-        st.session_state.cached_recommendations_grouped = recommendations_by_type
-        
-        st.session_state.issues_hash = current_issues_hash
+    _collect_all_recommendations()
+    st.session_state.issues_hash = current_issues_hash
+else:
+    # Even if hash matches, re-collect if fairness_recommendations were added
+    # (they might have been added after initial collection)
+    fairness_hash = str(hash(str(st.session_state.get('fairness_recommendations', {}))))
+    if 'fairness_hash' not in st.session_state or st.session_state.fairness_hash != fairness_hash:
+        _collect_all_recommendations()
+        st.session_state.fairness_hash = fairness_hash
 
 # Enhanced summary metrics
 col1, col2, col3, col4, col5 = st.columns(5)
@@ -1270,6 +1312,10 @@ with tab2:
                                 if 'fairness_recommendations' not in st.session_state:
                                     st.session_state.fairness_recommendations = {}
                                 st.session_state.fairness_recommendations[col] = fairness_rec
+                                
+                                # Re-collect recommendations to include this new bias mitigation recommendation
+                                # This ensures Tab 5 shows bias mitigation options even if collected before Tab 2 ran
+                                _collect_all_recommendations()
                                 
                                 st.success("✅ Exact Fairness Recommendations Generated by AI")
                                 
@@ -1607,7 +1653,8 @@ with tab5:
                 'missing_value': '📊 Missing Values',
                 'duplicate': '🔄 Duplicates',
                 'outlier': '📈 Outliers',
-                'bias_normalization': '⚖️ Bias Normalization'
+                'bias_normalization': '⚖️ Bias Normalization',
+                'bias_mitigation': '⚖️ Bias Mitigation (SMOTE/Oversampling)'
             }
             
             with st.expander(f"{type_labels.get(rec_type, rec_type)} ({len(recs)} recommendations)", expanded=True):
