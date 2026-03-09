@@ -227,7 +227,8 @@ MedGuard AI is designed with healthcare privacy as a core principle:
 
 ---
 
-## 🏆 Team: The Guardians
+## 🏆 Team: The Bias Busters
+
 
 **Convergence 2026 - GSG x GWiSE Interdisciplinary Graduate Hackathon**
 
@@ -258,22 +259,6 @@ MedGuard AI is designed with healthcare privacy as a core principle:
 
 MIT License - See LICENSE file for details
 
----
-
-## 🙏 Acknowledgments
-
-- American Heart Association (cholesterol guidelines)
-- CDC Health Disparities Reports (population health data)
-- FDA AI/ML Medical Device Guidance (regulatory requirements)
-- Northeastern University (hackathon support)
-
----
-
-## 📞 Contact
-
-**GitHub:** [github.com/Varsh1009/meddata-guardian](https://github.com/Varsh1009/meddata-guardian)  
-**Event:** Convergence 2026 Hackathon  
-**Date:** January 30, 2026  
 
 ---
 
