@@ -192,23 +192,36 @@ Respond with ONLY valid JSON.
             return self._create_fallback_plan(user_context)
     
     def _create_fallback_plan(self, user_context: Dict) -> DeploymentPlanSchema:
-        """Safe fallback plan"""
-        
-        timeline_weeks = user_context.get('timeline_days', 90) // 7
-        
-        return DeploymentPlanSchema(
-            recommended_strategy="Data quality fixes then model training",
-            why_this_strategy="Address critical issues before model development",
-            weekly_plan=[
+        """Safe fallback plan with multiple weeks."""
+        timeline_days = user_context.get('timeline_days', 90)
+        num_weeks = max(2, min(8, timeline_days // 7))
+        weekly_plan = []
+        for w in range(1, num_weeks + 1):
+            start = (w - 1) * 7 + 1
+            end = w * 7
+            if w == 1:
+                tasks = ["Fix missing values", "Remove duplicates", "Document data dictionary"]
+                deliverables = ["Cleaned dataset", "Quality report"]
+            elif w == 2:
+                tasks = ["Apply bias mitigation (SMOTE or normalization)", "Re-run fairness checks"]
+                deliverables = ["Balanced dataset", "Fairness report"]
+            else:
+                tasks = [f"Model development and validation (week {w})", "Internal review"]
+                deliverables = [f"Week {w} deliverables"]
+            weekly_plan.append(
                 WeeklyTask(
-                    week_number=1,
-                    days_range="Days 1-7",
-                    tasks=["Fix missing values", "Remove duplicates", "Apply bias mitigation"],
-                    deliverables=["Cleaned dataset"],
-                    estimated_hours=20
+                    week_number=w,
+                    days_range=f"Days {start}-{end}",
+                    tasks=tasks,
+                    deliverables=deliverables,
+                    estimated_hours=16 if w <= 2 else 12
                 )
-            ],
-            critical_path_items=["Data cleaning", "Bias mitigation"],
+            )
+        return DeploymentPlanSchema(
+            recommended_strategy="Data quality fixes then bias mitigation then model training",
+            why_this_strategy="Address critical issues before model development",
+            weekly_plan=weekly_plan,
+            critical_path_items=["Data cleaning", "Bias mitigation", "Model validation"],
             risk_factors=["Timeline may be too short for data collection"],
             alternative_paths=[],
             success_metrics=["Dataset quality score >0.9", "Fairness metrics <5% disparity"]
