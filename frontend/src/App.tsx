@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   listDemos,
   phiScanDemo,
@@ -6,16 +6,20 @@ import {
   generateSynthetic,
   analysisQuality,
   analysisBias,
+  fairnessSpecialistAnalyze,
   getRecommendations,
   implementChanges,
   getDeploymentPlan,
   askAI,
   type UserContext,
+  type FairnessRecommendation,
 } from './api';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, ReferenceLine } from 'recharts';
 
 type Step = 'onboarding' | 'dataset' | 'synthetic' | 'analysis';
 type TabId = 'quality' | 'bias' | 'deployment' | 'ask' | 'implement';
+
+type FairnessPlanState = FairnessRecommendation | 'loading' | 'error';
 
 const TIMELINE_DAYS: Record<string, number> = {
   '<30 days (urgent)': 30,
@@ -81,6 +85,9 @@ export default function App() {
   const [askAnswer, setAskAnswer] = useState<string | null>(null);
   const [askError, setAskError] = useState<string | null>(null);
   const [askLoading, setAskLoading] = useState(false);
+  const [fairnessByAttribute, setFairnessByAttribute] = useState<Record<string, FairnessPlanState>>({});
+  const fairnessFetchStartedRef = useRef<Set<string>>(new Set());
+  const analysisEpochRef = useRef(0);
 
   const loadDemos = useCallback(async () => {
     try {
@@ -169,6 +176,9 @@ export default function App() {
     if (!phiResult?.data) return;
     setError(null);
     setLoading(true);
+    analysisEpochRef.current += 1;
+    fairnessFetchStartedRef.current = new Set();
+    setFairnessByAttribute({});
     try {
       const n = phiResult.data.length;
       const res = await generateSynthetic({
@@ -176,14 +186,14 @@ export default function App() {
         file: uploadFile || undefined,
         n_samples: n,
       });
+      const q = await analysisQuality(res.synthetic_data);
+      const b = await analysisBias(res.synthetic_data);
+      const recs = await getRecommendations(q.issues, b.issues);
       setSyntheticData(res.synthetic_data);
       setSyntheticValidation(res.validation);
       setStep('analysis');
-      const q = await analysisQuality(res.synthetic_data);
       setQualityResult(q);
-      const b = await analysisBias(res.synthetic_data);
       setBiasResult(b);
-      const recs = await getRecommendations(q.issues, b.issues);
       setRecommendations(recs.recommendations || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed');
@@ -191,6 +201,40 @@ export default function App() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (activeTab !== 'bias' || !biasResult || !userContext || !syntheticData?.length) return;
+
+    const epochAtStart = analysisEpochRef.current;
+    const total = syntheticData.length;
+    const entries = Object.entries(biasResult.issues) as [string, { bias_detected?: boolean; distribution?: Record<string, number>; issues?: string[] }][];
+
+    for (const [col, info] of entries) {
+      if (!info.bias_detected) continue;
+      if (fairnessFetchStartedRef.current.has(col)) continue;
+      fairnessFetchStartedRef.current.add(col);
+      setFairnessByAttribute((prev) => ({ ...prev, [col]: 'loading' }));
+
+      fairnessSpecialistAnalyze({
+        attribute: col,
+        distribution: Object.fromEntries(
+          Object.entries(info.distribution ?? {}).map(([k, v]) => [k, Number(v)])
+        ),
+        issues: info.issues ?? [],
+        user_context: { ...userContext },
+        total_samples: total,
+      })
+        .then((data) => {
+          if (analysisEpochRef.current !== epochAtStart) return;
+          setFairnessByAttribute((prev) => ({ ...prev, [col]: data }));
+        })
+        .catch(() => {
+          if (analysisEpochRef.current !== epochAtStart) return;
+          fairnessFetchStartedRef.current.delete(col);
+          setFairnessByAttribute((prev) => ({ ...prev, [col]: 'error' }));
+        });
+    }
+  }, [activeTab, biasResult, userContext, syntheticData]);
 
   const toggleRecommendation = (key: string) => {
     setSelectedKeys((prev) => {
@@ -372,7 +416,7 @@ export default function App() {
         return (
           <div className="right-content">
             <h2 className="right-title">Bias & Fairness Analysis</h2>
-            <p className="right-subtitle">Demographic balance and fairness metrics. Target: &lt;5% gap for binary attributes (e.g. sex/gender).</p>
+            <p className="right-subtitle">Statistical bias detection plus Fairness Specialist (same as Streamlit): detailed issues, predicted harm, recruitment vs technical fixes.</p>
             <div className="metrics-row">
               <div className="metric">
                 <div className="metric-value">{String(biasResult.summary?.attributes_analyzed ?? 0)}</div>
@@ -399,9 +443,11 @@ export default function App() {
               const isBinary = values.length === 2;
               const biasDetected = info.bias_detected ?? gapPct > threshold;
               const issuesList = info.issues ?? [];
+              const fairnessState = fairnessByAttribute[col];
+              const userTimelineDays = userContext?.timeline_days ?? 0;
               return (
                 <div key={col} className="bias-attribute-block">
-                  <div className="bias-attribute-title">{col}</div>
+                  <div className="bias-attribute-title">Analysis: {col}</div>
                   <div className="bias-stats-row">
                     <span className="bias-stat"><strong>Distribution gap:</strong> {gapPct.toFixed(1)}%</span>
                     <span className="bias-stat"><strong>Fairness threshold:</strong> {isBinary ? `\u003c${threshold}% for binary` : '\u003c20% per group'}</span>
@@ -409,6 +455,31 @@ export default function App() {
                       {biasDetected ? 'Bias detected' : 'Balanced'}
                     </span>
                   </div>
+                  {biasDetected && (
+                    <div className={`alert ${gapPct < 15 ? 'alert-warning' : 'alert-error'}`} style={{ textAlign: 'left' }}>
+                      {gapPct < 15 ? (
+                        <>⚠️ <strong>Minor imbalance detected.</strong></>
+                      ) : (
+                        <>🚨 <strong>Significant imbalance!</strong></>
+                      )}{' '}
+                      Distribution gap: {gapPct.toFixed(1)}% (fairness threshold: &lt;5%)
+                    </div>
+                  )}
+                  {!biasDetected && (
+                    <div className="alert alert-success" style={{ textAlign: 'left' }}>
+                      ✅ <strong>Well balanced!</strong> Distribution gap: {gapPct.toFixed(1)}% (fairness threshold: &lt;5%)
+                    </div>
+                  )}
+                  {biasDetected && issuesList.length > 0 && (
+                    <>
+                      <div className="section-title">⚠️ BIAS DETECTED — Detailed Issues</div>
+                      <ul className="bias-issues-list">
+                        {issuesList.map((issue, i) => (
+                          <li key={i}>{issue}</li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
                   <table className="data-table">
                     <thead>
                       <tr>
@@ -429,16 +500,6 @@ export default function App() {
                       ))}
                     </tbody>
                   </table>
-                  {issuesList.length > 0 && (
-                    <>
-                      <div className="section-title">Why bias was flagged</div>
-                      <ul className="bias-issues-list">
-                        {issuesList.map((issue, i) => (
-                          <li key={i}>{issue}</li>
-                        ))}
-                      </ul>
-                    </>
-                  )}
                   <div className="bias-chart-wrap">
                     <ResponsiveContainer width="100%" height={220}>
                       <BarChart data={distEntries} layout="vertical" margin={{ left: 60 }}>
@@ -458,6 +519,101 @@ export default function App() {
                     </ResponsiveContainer>
                     <p className="bias-target-note">Dashed line: 50% (balanced). Green: 45–55%; Amber: outside range; Red: under 20%.</p>
                   </div>
+                  {biasDetected && userContext && (
+                    <div className="fairness-ai-block">
+                      <div className="section-title">🤖 AI-Generated Fairness Plan</div>
+                      {fairnessState === 'loading' && (
+                        <p className="fairness-ai-loading">Fairness Specialist generating recommendations…</p>
+                      )}
+                      {fairnessState === 'error' && (
+                        <div className="alert alert-error" style={{ textAlign: 'left' }}>
+                          Fairness Specialist request failed. Ensure the FastAPI backend, Ollama (<code>ollama serve</code>), and the model <code>llama3.2:3b</code> are available; the API falls back to a default plan when the model errors.
+                        </div>
+                      )}
+                      {fairnessState && fairnessState !== 'loading' && fairnessState !== 'error' && (
+                        <>
+                          <div className="alert alert-success" style={{ textAlign: 'left' }}>
+                            ✅ Exact Fairness Recommendations Generated by AI
+                          </div>
+                          <h4 className="fairness-subheading">🚨 Predicted Harm if Not Fixed</h4>
+                          <div className="fairness-harm-metrics">
+                            <div className="fairness-metric-card">
+                              <div className="fairness-metric-label">Performance Gap</div>
+                              <div className="fairness-metric-value">{fairnessState.predicted_harm.performance_gap_percentage.toFixed(1)}%</div>
+                              <div className="fairness-metric-delta">−{fairnessState.predicted_harm.performance_gap_percentage.toFixed(1)}%</div>
+                            </div>
+                            <div className="fairness-metric-card">
+                              <div className="fairness-metric-label">Patients Affected</div>
+                              <div className="fairness-metric-value">{fairnessState.predicted_harm.patients_affected_per_100}/100</div>
+                            </div>
+                            <div className="fairness-metric-card">
+                              <div className="fairness-metric-label">Severity</div>
+                              <div className="fairness-metric-value">
+                                {fairnessState.severity === 'critical' ? '🔴' : '🟡'} {fairnessState.severity.toUpperCase()}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="alert alert-error" style={{ textAlign: 'left' }}>
+                            <strong>Clinical Impact:</strong> {fairnessState.predicted_harm.clinical_consequence}
+                          </div>
+                          <h4 className="fairness-subheading">🔢 Exact Requirements for Fairness</h4>
+                          <ul className="list-plain fairness-req-list">
+                            {Object.entries(fairnessState.exact_samples_needed).map(([group, count]) => (
+                              <li key={group}>
+                                <strong>{group}:</strong> Need {typeof count === 'number' ? count.toLocaleString() : count} additional patients
+                              </li>
+                            ))}
+                          </ul>
+                          <h4 className="fairness-subheading">🛠️ Remediation Options</h4>
+                          <div className="fairness-options-grid">
+                            <div className="fairness-option-card">
+                              <div className="fairness-option-title">🏥 Option 1: Real Data Collection</div>
+                              <p>
+                                <strong>⏱️ Timeline:</strong> {fairnessState.recruitment_plan.timeline_months} months
+                              </p>
+                              {fairnessState.recruitment_plan.estimated_cost_usd != null && (
+                                <p>
+                                  <strong>💰 Cost:</strong> ${fairnessState.recruitment_plan.estimated_cost_usd.toLocaleString()}
+                                </p>
+                              )}
+                              <p><strong>🏥 Target Facilities:</strong></p>
+                              <ol className="fairness-facility-list">
+                                {fairnessState.recruitment_plan.target_facilities.map((f, i) => (
+                                  <li key={i}>{f}</li>
+                                ))}
+                              </ol>
+                              {!fairnessState.fits_user_timeline ? (
+                                <div className="alert alert-error" style={{ textAlign: 'left', marginTop: 8 }}>
+                                  ❌ <strong>Timeline Mismatch:</strong> Your timeline ({userTimelineDays} days) is shorter than needed (
+                                  {fairnessState.recruitment_plan.timeline_months * 30} days)
+                                </div>
+                              ) : (
+                                <div className="alert alert-success" style={{ textAlign: 'left', marginTop: 8 }}>
+                                  ✅ Fits your {userTimelineDays}-day timeline
+                                </div>
+                              )}
+                            </div>
+                            <div className="fairness-option-card">
+                              <div className="fairness-option-title">⚡ Option 2: Immediate Technical Fix</div>
+                              <p>
+                                <strong>🔧 Method:</strong> {fairnessState.immediate_technical_fix.method}
+                              </p>
+                              <p>
+                                <strong>📈 Expected:</strong> {fairnessState.immediate_technical_fix.expected_improvement}
+                              </p>
+                              <pre className="code-block">{fairnessState.immediate_technical_fix.python_code}</pre>
+                              <div className="alert alert-warning" style={{ textAlign: 'left' }}>
+                                ⚠️ <strong>Limitation:</strong> {fairnessState.immediate_technical_fix.limitations}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="alert alert-info" style={{ textAlign: 'left' }}>
+                            💡 <strong>AI Strategic Recommendation:</strong> {fairnessState.recommendation_priority}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}

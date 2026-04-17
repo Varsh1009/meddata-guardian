@@ -641,3 +641,106 @@ a {
   color: var(--text-muted);
   margin-top: 8px;
 }
+
+/* Fairness Specialist (React bias tab) */
+.fairness-ai-block {
+  margin-top: var(--space-lg);
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--border);
+  text-align: left;
+}
+
+.fairness-subheading {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: var(--space) 0 8px;
+  color: var(--text);
+}
+
+.fairness-ai-loading {
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+  margin: 0;
+}
+
+.fairness-harm-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space);
+  margin-bottom: var(--space);
+}
+
+@media (max-width: 640px) {
+  .fairness-harm-metrics {
+    grid-template-columns: 1fr;
+  }
+}
+
+.fairness-metric-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  box-shadow: var(--shadow);
+}
+
+.fairness-metric-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.fairness-metric-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.fairness-metric-delta {
+  font-size: 0.8rem;
+  color: var(--error);
+  margin-top: 2px;
+}
+
+.fairness-req-list {
+  margin: 0 0 var(--space);
+  padding-left: 20px;
+  color: var(--text-secondary);
+}
+
+.fairness-options-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space);
+  margin-bottom: var(--space);
+}
+
+@media (max-width: 720px) {
+  .fairness-options-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.fairness-option-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space);
+  text-align: left;
+  box-shadow: var(--shadow);
+}
+
+.fairness-option-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.fairness-facility-list {
+  margin: 4px 0 0;
+  padding-left: 20px;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}

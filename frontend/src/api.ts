@@ -83,6 +83,53 @@ export async function analysisBias(data: Record<string, unknown>[], target_col?:
   return r.json();
 }
 
+export type FairnessRecommendation = {
+  bias_type: string;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  current_distribution: Record<string, number>;
+  target_distribution: Record<string, number>;
+  exact_samples_needed: Record<string, number>;
+  predicted_harm: {
+    performance_gap_percentage: number;
+    patients_affected_per_100: number;
+    clinical_consequence: string;
+    annual_impact_estimate?: string | null;
+  };
+  recruitment_plan: {
+    target_facilities: string[];
+    timeline_months: number;
+    estimated_cost_usd?: number | null;
+    specific_contacts?: string | null;
+  };
+  immediate_technical_fix: {
+    method: string;
+    python_code: string;
+    expected_improvement: string;
+    limitations: string;
+  };
+  fits_user_timeline: boolean;
+  recommendation_priority: string;
+};
+
+export async function fairnessSpecialistAnalyze(body: {
+  attribute: string;
+  distribution: Record<string, number>;
+  issues: string[];
+  user_context: Record<string, unknown>;
+  total_samples: number;
+}): Promise<FairnessRecommendation> {
+  const r = await fetch(`${API_BASE}/api/fairness/specialist`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ detail: r.statusText }));
+    throw new Error(typeof err.detail === 'string' ? err.detail : 'Fairness specialist failed');
+  }
+  return r.json();
+}
+
 export async function getRecommendations(quality_issues: Record<string, unknown>, bias_issues: Record<string, unknown>) {
   const r = await fetch(`${API_BASE}/api/recommendations`, {
     method: 'POST',

@@ -42,6 +42,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+_fairness_specialist = None
+
+
+def _get_fairness_specialist():
+    global _fairness_specialist
+    if _fairness_specialist is None:
+        from src.agents.fairness_specialist import FairnessSpecialist
+
+        _fairness_specialist = FairnessSpecialist()
+    return _fairness_specialist
+
+
 # ---------------------------------------------------------------------------
 # Helpers: DataFrame <-> JSON
 # ---------------------------------------------------------------------------
@@ -222,6 +234,17 @@ class AskAIRequest(BaseModel):
     user_context: Dict[str, Any]
     quality_summary: Dict[str, Any]
     bias_summary: Dict[str, Any]
+
+
+class FairnessSpecialistRequest(BaseModel):
+    """One demographic attribute; mirrors Streamlit Tab 2 Fairness Specialist call."""
+
+    attribute: str
+    distribution: Dict[str, float]
+    issues: List[str]
+    user_context: Dict[str, Any]
+    total_samples: int
+
 
 @app.post("/api/implement")
 async def implement_changes(req: ImplementRequest):
@@ -512,6 +535,47 @@ async def get_deployment_plan(body: Dict[str, Any]):
         return _make_serializable(out)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Deployment plan failed: {str(e)}")
+
+
+@app.post("/api/fairness/specialist")
+async def fairness_specialist_analyze(req: FairnessSpecialistRequest):
+    """
+    Run Fairness Specialist (Ollama + schema) for one biased attribute.
+    Same inputs as Streamlit app_complete.py bias tab.
+    """
+    if not req.issues:
+        raise HTTPException(status_code=400, detail="issues required when bias is detected")
+    dist = {str(k): float(v) for k, v in req.distribution.items()}
+    if not dist:
+        raise HTTPException(status_code=400, detail="distribution cannot be empty")
+
+    first_issue = req.issues[0]
+    minority_group = first_issue.split(":")[0].strip() if first_issue else "underrepresented"
+    bias_data = {
+        "type": f"{req.attribute}_imbalance",
+        "distribution": dist,
+        "minority_group": minority_group,
+    }
+    dist_values = list(dist.values())
+    majority_pct = max(dist_values)
+    minority_pct = min(dist_values)
+    total = max(0, int(req.total_samples))
+    majority_count = int(total * majority_pct / 100.0)
+    minority_count = int(total * minority_pct / 100.0)
+    samples_needed = max(0, majority_count - minority_count)
+    stats = {
+        "total_samples": total,
+        "samples_needed": samples_needed,
+        "imbalance_pct": abs(majority_pct - 50.0),
+    }
+    try:
+        specialist = _get_fairness_specialist()
+        rec = specialist.analyze_bias(bias_data, req.user_context, stats)
+        out = rec.model_dump() if hasattr(rec, "model_dump") else rec.dict()
+        return _make_serializable(out)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fairness specialist failed: {str(e)}")
+
 
 # ---------------------------------------------------------------------------
 # Health
