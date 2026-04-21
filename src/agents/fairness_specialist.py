@@ -49,18 +49,18 @@ class RecruitmentPlan(BaseModel):
 class TechnicalMitigation(BaseModel):
     """Schema for immediate technical fixes"""
     
-    method: Literal["SMOTE", "class_weighting", "undersampling", "separate_models"]
-    
+    method: Literal["equitable_care_generation", "class_weighting", "targeted_recruitment", "separate_models"]
+
     python_code: str = Field(
         max_length=500,
         description="Working Python code to implement"
     )
-    
+
     expected_improvement: str = Field(
         max_length=150,
         description="Expected accuracy improvement with numbers"
     )
-    
+
     limitations: str = Field(
         max_length=200,
         description="What this method cannot solve"
@@ -201,14 +201,14 @@ Provide response as valid JSON matching this EXACT structure:
   }},
   
   "immediate_technical_fix": {{
-    "method": "SMOTE",
-    "python_code": "from imblearn.over_sampling import SMOTE\\nsmote = SMOTE()\\nX_res, y_res = smote.fit_resample(X, y)",
-    "expected_improvement": "Women accuracy: 71% → 84%",
-    "limitations": "Synthetic data may not capture all real-world variation. SMOTE creates synthetic samples based on existing patterns, which may not fully represent true demographic diversity."
+    "method": "equitable_care_generation",
+    "python_code": "from src.utils.equitable_generator import EquitableGenerator\ngenerator = EquitableGenerator(spec, causal_result)\nresult = generator.generate(df, intervention_plan)",
+    "expected_improvement": "Women accuracy: 71% → 84% using causal equitable-care synthesis",
+    "limitations": "Requires learned causal DAG. Biological pathways are preserved; only illegitimate care-pathway variables are intervened on."
   }},
-  
+
   "fits_user_timeline": false,
-  "recommendation_priority": "Given 60-day timeline, use SMOTE immediately..."
+  "recommendation_priority": "Run FIDES Stage 0 pre-analysis to identify exact subgroup gaps, then Stage 4 intervention optimizer for minimum recruitment targets."
 }}
 
 CRITICAL RULES:
@@ -333,10 +333,10 @@ Respond with ONLY valid JSON, no other text. Start with {{ and end with }}.
             ),
             
             immediate_technical_fix=TechnicalMitigation(
-                method="SMOTE",
-                python_code="from imblearn.over_sampling import SMOTE\nsmote = SMOTE(random_state=42)\nX_balanced, y_balanced = smote.fit_resample(X, y)",
-                expected_improvement=f"Balance dataset to include more {minority_group} samples",
-                limitations="Synthetic data may not capture all real-world variation"
+                method="equitable_care_generation",
+                python_code="from src.utils.equitable_generator import EquitableGenerator\ngenerator = EquitableGenerator(spec, causal_result)\nresult = generator.generate(df, intervention_plan)",
+                expected_improvement=f"Generate equitable-care counterfactuals for {minority_group} — preserves biology, blocks discriminatory pathways",
+                limitations="Requires FIDES causal DAG. Biological features are preserved; only illegitimate care-pathway variables intervened on."
             ),
             
             fits_user_timeline=False,

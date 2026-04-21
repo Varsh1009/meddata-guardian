@@ -32,6 +32,15 @@ from src.utils.data_quality import DataQualityAnalyzer
 from src.utils.bias_detection import BiasDetector
 from src.agents.deployment_strategist import DeploymentStrategist
 
+# FIDES pipeline imports
+from src.utils.research_spec import build_research_spec, spec_summary, ResearchSpec
+from src.utils.hipaa_ingestion import ingest as hipaa_ingest, get_audit_log
+from src.utils.causal_discovery import run_causal_discovery
+from src.utils.cds_assessor import CDSAssessor
+from src.utils.intervention_optimizer import optimize_intervention
+from src.utils.equitable_generator import EquitableGenerator
+from src.utils.certificate_builder import build_certificate
+
 app = FastAPI(title="MedGuard AI API", version="1.0.0")
 
 app.add_middleware(
@@ -322,44 +331,10 @@ async def implement_changes(req: ImplementRequest):
             elif rec.get("type") == "bias_mitigation" and rec.get("column"):
                 col_name = rec["column"]
                 method = rec.get("method", "")
-                if "SMOTE" in method:
-                    try:
-                        from imblearn.over_sampling import SMOTE
-                        X = modified_df.drop(columns=[col_name])
-                        y = modified_df[col_name]
-                        numeric_cols = X.select_dtypes(include=[np.number]).columns.tolist()
-                        if numeric_cols:
-                            X_numeric = X[numeric_cols].values
-                            smote = SMOTE(random_state=42)
-                            X_res, y_res = smote.fit_resample(X_numeric, y)
-                            resampled = pd.DataFrame(X_res, columns=numeric_cols)
-                            resampled[col_name] = y_res
-                            cat_cols = X.select_dtypes(exclude=[np.number]).columns.tolist()
-                            for c in cat_cols:
-                                resampled[c] = None
-                            for i in range(min(len(modified_df), len(resampled))):
-                                for c in cat_cols:
-                                    resampled.iloc[i, resampled.columns.get_loc(c)] = modified_df.iloc[i][c]
-                            if len(resampled) > len(modified_df):
-                                minority = y_res.iloc[len(modified_df)] if hasattr(y_res, 'iloc') else y_res[len(modified_df)]
-                                minority_df = modified_df[modified_df[col_name] == minority]
-                                for i in range(len(modified_df), len(resampled)):
-                                    row = minority_df.sample(n=1, random_state=42 + i).iloc[0]
-                                    for c in cat_cols:
-                                        resampled.iloc[i, resampled.columns.get_loc(c)] = row[c]
-                            modified_df = resampled
-                            applied.append(f"SMOTE on {col_name}")
-                        else:
-                            vc = modified_df[col_name].value_counts()
-                            minority_group = vc.idxmin()
-                            majority_count = vc.max()
-                            minority_df = modified_df[modified_df[col_name] == minority_group]
-                            need = majority_count - len(minority_df)
-                            oversampled = minority_df.sample(n=int(need), replace=True, random_state=42)
-                            modified_df = pd.concat([modified_df, oversampled]).reset_index(drop=True)
-                            applied.append(f"Oversampling on {col_name}")
-                    except Exception as e:
-                        applied.append(f"SMOTE failed: {e}")
+                if "equitable" in method.lower() or "fides" in method.lower():
+                    # Equitable-care generation via FIDES pipeline
+                    # Use /api/fides/run endpoint for full causal generation
+                    applied.append(f"Use FIDES /api/fides/run with generate_synthetic=true for equitable-care generation on {col_name}")
                 elif "undersampling" in method.lower():
                     vc = modified_df[col_name].value_counts()
                     minority_group = vc.idxmin()
@@ -491,10 +466,10 @@ async def get_recommendations(body: Dict[str, Any]):
                 gap = abs(max(dist_vals) - min(dist_vals))
                 if gap > 5:
                     all_recs.append({
-                        "type": "bias_mitigation", "column": col, "method": "SMOTE",
-                        "priority": "⭐ RECOMMENDED", "reason": f"Balance (gap {gap:.1f}%)",
-                        "code": "from imblearn.over_sampling import SMOTE\nsmote = SMOTE(random_state=42)\nX_balanced, y_balanced = smote.fit_resample(X, y)",
-                        "value": None, "impact": f"Reduce gap from {gap:.1f}%", "key": f"bias_smote_{col}",
+                        "type": "bias_mitigation", "column": col, "method": "equitable_care_generation",
+                        "priority": "⭐ RECOMMENDED", "reason": f"Causal equitable-care synthesis (gap {gap:.1f}%)",
+                        "code": "# Use FIDES pipeline: POST /api/fides/run with generate_synthetic=true\n# Generates clinically-valid equitable-care counterfactuals\n# Blocks only illegitimate causal pathways, preserves biology",
+                        "value": None, "impact": f"Reduce gap from {gap:.1f}% via causal generation", "key": f"bias_fides_{col}",
                     })
 
     return {"recommendations": all_recs}
@@ -521,7 +496,7 @@ async def get_deployment_plan(body: Dict[str, Any]):
     fairness_rec_dict = body.get("fairness_recommendations") or {
         "exact_samples_needed": {},
         "timeline_months": 6,
-        "immediate_method": "SMOTE",
+        "immediate_method": "equitable_care_generation",
     }
     try:
         strategist = DeploymentStrategist()
@@ -576,6 +551,199 @@ async def fairness_specialist_analyze(req: FairnessSpecialistRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fairness specialist failed: {str(e)}")
 
+
+# ── FIDES Pipeline Endpoints ─────────────────────────────────────────────────
+
+# In-memory session store for pipeline state (keyed by session_id)
+_fides_sessions: Dict[str, Dict] = {}
+
+
+class FIDESPreAnalysisRequest(BaseModel):
+    domain: str
+    target_variable: str
+    target_type: str = "binary"
+    use_case: str = "research"
+    columns: List[str]
+    intent: str = ""
+    session_id: str = "default"
+
+
+class FIDESRunRequest(BaseModel):
+    session_id: str = "default"
+    epsilon: float = 1.0
+    generate_synthetic: bool = False
+    irb_protocol: str = ""
+    user_id: str = "anonymous"
+
+
+@app.post("/api/fides/pre-analysis")
+async def fides_pre_analysis(req: FIDESPreAnalysisRequest):
+    """Stage 0: Build ResearchSpec from column names + intent. Zero PHI."""
+    try:
+        spec = build_research_spec(
+            domain=req.domain,
+            target_variable=req.target_variable,
+            target_type=req.target_type,
+            use_case=req.use_case,
+            columns=req.columns,
+            intent=req.intent,
+        )
+        _fides_sessions[req.session_id] = {"spec": spec}
+        return {
+            "status": "ok",
+            "session_id": req.session_id,
+            "summary": spec_summary(spec),
+            "spec": _make_serializable(spec.model_dump()),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/fides/run")
+async def fides_run(
+    file: UploadFile = File(...),
+    session_id: str = Form("default"),
+    epsilon: float = Form(1.0),
+    generate_synthetic: bool = Form(False),
+    irb_protocol: str = Form(""),
+    user_id: str = Form("anonymous"),
+):
+    """Stages 1–6: Run full FIDES pipeline on uploaded dataset."""
+    session = _fides_sessions.get(session_id, {})
+    spec = session.get("spec")
+
+    # Read uploaded file
+    contents = await file.read()
+    try:
+        df = pd.read_csv(io.BytesIO(contents))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Cannot parse CSV: {e}")
+
+    # If no spec, build a minimal one from column names
+    if spec is None:
+        spec = build_research_spec(
+            domain="general",
+            target_variable=df.columns[-1],
+            target_type="binary",
+            use_case="research",
+            columns=list(df.columns),
+        )
+
+    results = {}
+
+    try:
+        # Stage 1: HIPAA Ingestion
+        clean_df, audit_record = hipaa_ingest(df, spec, user_id=user_id, irb_protocol=irb_protocol)
+        results["stage1_audit"] = audit_record
+        dataset_hash = audit_record.get("original_hash", "unknown")
+
+        # Stage 2: Causal Discovery
+        causal_result = run_causal_discovery(clean_df, spec, epsilon=epsilon)
+        results["stage2_causal"] = {
+            "edges": causal_result.edges,
+            "privacy_budget_used": causal_result.privacy_budget_used,
+            "path_validation": causal_result.path_validation,
+        }
+
+        # Stage 3: CDS Assessment
+        assessor = CDSAssessor(clean_df, spec, causal_result)
+        cds_result = assessor.assess()
+        results["stage3_cds"] = {
+            "cds_score": cds_result.cds_score,
+            "condition_scores": cds_result.condition_scores,
+            "confidence_interval": list(cds_result.confidence_interval),
+            "threshold_met": cds_result.threshold_met,
+            "insufficiency_flags": cds_result.insufficiency_masking_flags,
+            "recommendations": cds_result.recommendations,
+        }
+
+        # Stage 4: Intervention Optimization
+        intervention = optimize_intervention(cds_result, spec)
+        results["stage4_intervention"] = {
+            "total_new_patients": intervention.total_new_patients,
+            "feasible": intervention.feasible,
+            "estimated_cost_usd": intervention.estimated_cost_usd,
+            "groups": [
+                {
+                    "group_name": g.group_name,
+                    "n_required": g.n_required,
+                    "condition": g.condition_driving_need,
+                    "phenotype": g.phenotype_profile,
+                    "sites": g.recommended_sites,
+                    "priority": g.priority,
+                }
+                for g in intervention.groups
+            ],
+        }
+
+        # Stage 5: Equitable-Care Generation (optional)
+        gen_result = None
+        cds_after = cds_result
+        if generate_synthetic and intervention.total_new_patients > 0:
+            generator = EquitableGenerator(spec, causal_result, epsilon=min(epsilon, 0.5))
+            gen_result = generator.generate(clean_df, intervention)
+            results["stage5_generation"] = {
+                "n_generated": gen_result.n_generated,
+                "n_rejected": gen_result.n_rejected,
+                "privacy_budget_used": gen_result.privacy_budget_used,
+                "k_anonymity": gen_result.k_anonymity_achieved,
+                "reidentification_risk": gen_result.reidentification_risk,
+            }
+            # Re-assess CDS on augmented data
+            cds_after = CDSAssessor(gen_result.augmented_df, spec, causal_result).assess()
+            results["stage3_cds_after"] = {
+                "cds_score": cds_after.cds_score,
+                "condition_scores": cds_after.condition_scores,
+                "threshold_met": cds_after.threshold_met,
+            }
+
+        # Stage 6: Certificate
+        cert = build_certificate(
+            dataset_hash=dataset_hash,
+            spec_id=f"{spec.domain}_{spec.target_variable}",
+            use_case=spec.use_case,
+            audit_record=audit_record,
+            cds_result_before=cds_result,
+            cds_result_after=cds_after,
+            gen_result=gen_result,
+            intervention_plan=intervention,
+            irb_protocol=irb_protocol,
+        )
+        results["stage6_certificate"] = {
+            "cert_id": cert.cert_id,
+            "verdict": cert.verdict,
+            "cds_before": cert.cds_score_before,
+            "cds_after": cert.cds_score_after,
+            "hipaa_compliant": cert.hipaa_compliant,
+            "fda_compliant": cert.fda_samd_compliant,
+            "conditions": cert.conditions,
+            "signature": cert.signature,
+        }
+
+        # Store in session
+        _fides_sessions[session_id]["last_results"] = results
+        _fides_sessions[session_id]["certificate"] = cert
+
+        return _make_serializable({"status": "ok", "session_id": session_id, **results})
+
+    except Exception as e:
+        import traceback
+        raise HTTPException(status_code=500, detail=f"FIDES pipeline error: {str(e)}\n{traceback.format_exc()}")
+
+
+@app.get("/api/fides/audit-log")
+async def fides_audit_log():
+    """Return the HIPAA audit log."""
+    return {"log": get_audit_log()}
+
+
+@app.get("/api/fides/session/{session_id}")
+async def fides_session(session_id: str):
+    """Retrieve stored session results."""
+    session = _fides_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return _make_serializable(session.get("last_results", {}))
 
 # ---------------------------------------------------------------------------
 # Health

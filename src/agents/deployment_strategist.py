@@ -114,7 +114,7 @@ USER CONSTRAINTS:
 FAIRNESS RECOMMENDATIONS:
 - Samples needed: {fairness_recommendations.get('exact_samples_needed', {})}
 - Recruitment timeline: {fairness_recommendations.get('timeline_months', 'N/A')} months
-- Immediate fix: {fairness_recommendations.get('immediate_method', 'SMOTE')}
+- Immediate fix: {fairness_recommendations.get('immediate_method', 'FIDES equitable-care generation')}
 
 Create a SPECIFIC week-by-week plan as JSON:
 
@@ -140,7 +140,7 @@ Create a SPECIFIC week-by-week plan as JSON:
     {{
       "scenario": "If can recruit only 200 patients instead of 552",
       "when_to_pivot": "If recruitment slower than expected",
-      "modified_timeline": "Use hybrid approach: 200 real + 352 SMOTE"
+      "modified_timeline": "Use hybrid approach: 200 real + 352 FIDES equitable-care generation"
     }}
   ],
   
@@ -203,7 +203,7 @@ Respond with ONLY valid JSON.
                 tasks = ["Fix missing values", "Remove duplicates", "Document data dictionary"]
                 deliverables = ["Cleaned dataset", "Quality report"]
             elif w == 2:
-                tasks = ["Apply bias mitigation (SMOTE or normalization)", "Re-run fairness checks"]
+                tasks = ["Apply bias mitigation (FIDES equitable-care generation or normalization)", "Re-run fairness checks"]
                 deliverables = ["Balanced dataset", "Fairness report"]
             else:
                 tasks = [f"Model development and validation (week {w})", "Internal review"]
@@ -249,7 +249,7 @@ if __name__ == "__main__":
     fairness_rec = {
         'exact_samples_needed': {'Female': 552},
         'timeline_months': 6,
-        'immediate_method': 'SMOTE'
+        'immediate_method': 'FIDES equitable-care generation'
     }
     
     user_context = {
